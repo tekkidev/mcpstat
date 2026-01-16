@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "mcpstat"
-version = "0.1.0"
+version = "0.1.1"
 description = "Usage tracking, analytics, and file logging for MCP (Model Context Protocol) servers"
 authors = ["Vadim Bakhrenkov <hello@vadim.dev>"]
 license = "MIT"
@@ -110,6 +110,7 @@ select = [
 ignore = [
     "E501",   # line too long (handled by formatter)
     "B008",   # function-call-in-default-argument
+    "UP017",  # datetime.UTC - requires Python 3.11+, we support 3.10
 ]
 
 [tool.ruff.lint.isort]

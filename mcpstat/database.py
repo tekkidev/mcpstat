@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -153,7 +153,7 @@ class MCPStatDatabase:
             primitive_type: MCP primitive type
         """
         self._ensure_schema()
-        now = datetime.now(UTC).isoformat(timespec="seconds")
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
         async with self._get_lock():
             with self._connect() as conn:
@@ -321,7 +321,7 @@ class MCPStatDatabase:
             full_description: Full description
         """
         self._ensure_schema()
-        now = datetime.now(UTC).isoformat(timespec="seconds")
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
         async with self._get_lock():
             with self._connect() as conn:
@@ -354,7 +354,7 @@ class MCPStatDatabase:
             cleanup_orphans: Remove metadata for unregistered tools
         """
         self._ensure_schema()
-        now = datetime.now(UTC).isoformat(timespec="seconds")
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         tool_names = {t["name"] for t in tools}
 
         async with self._get_lock():
