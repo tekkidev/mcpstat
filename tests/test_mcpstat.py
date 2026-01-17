@@ -57,6 +57,18 @@ class TestNormalizeTags(unittest.TestCase):
     def test_deduplicates(self):
         self.assertEqual(normalize_tags(["a", "A", "a"]), ["a"])
 
+    def test_stopword_filtering(self):
+        """Test stopword filtering when enabled."""
+        tags = ["convert", "to", "celsius", "the", "from"]
+        result = normalize_tags(tags, filter_stopwords=True)
+        self.assertEqual(result, ["convert", "celsius"])
+
+    def test_stopword_keeps_underscored(self):
+        """Stopwords with underscores are kept."""
+        tags = ["to_json", "from", "the"]
+        result = normalize_tags(tags, filter_stopwords=True)
+        self.assertIn("to_json", result)
+
 
 class TestDeriveShortDescription(unittest.TestCase):
     """Tests for derive_short_description function."""
@@ -79,6 +91,17 @@ class TestDeriveShortDescription(unittest.TestCase):
         desc = "Warning! This is important. More info."
         result = derive_short_description(desc, "x")
         self.assertTrue(result.startswith("Warning!"))
+
+    def test_handles_question(self):
+        """Test extraction with question mark delimiter."""
+        desc = "Is this valid? Yes it is."
+        result = derive_short_description(desc, "x")
+        self.assertEqual(result, "Is this valid?")
+
+    def test_empty_fallback_name(self):
+        """Test with empty fallback name."""
+        result = derive_short_description(None, "")
+        self.assertEqual(result, "No description available.")
 
 
 # ============================================================================
@@ -141,6 +164,36 @@ class TestMCPStatDatabase(unittest.TestCase):
         self.assertEqual(stats["total_calls"], 3)
         self.assertEqual(stats["tracked_count"], 2)
 
+    def test_get_stats_with_type_filter(self):
+        """Test get_stats with type_filter."""
+        run_async(self.db.record("tool1", "tool"))
+        run_async(self.db.record("prompt1", "prompt"))
+
+        stats = run_async(self.db.get_stats(type_filter="tool"))
+        self.assertEqual(stats["tracked_count"], 1)
+
+    def test_get_stats_with_limit(self):
+        """Test get_stats with limit."""
+        run_async(self.db.record("tool1", "tool"))
+        run_async(self.db.record("tool2", "tool"))
+        run_async(self.db.record("tool3", "tool"))
+
+        stats = run_async(self.db.get_stats(limit=2))
+        self.assertEqual(len(stats["stats"]), 2)
+
+    def test_get_stats_exclude_zero(self):
+        """Test get_stats excluding zero-count items."""
+        tools = [
+            {"name": "tool1", "tags": ["a"], "short_description": "T1"},
+            {"name": "tool2", "tags": ["b"], "short_description": "T2"},
+        ]
+        run_async(self.db.sync_metadata(tools))
+        run_async(self.db.record("tool1", "tool"))
+
+        # Only tool1 has calls
+        stats = run_async(self.db.get_stats(include_zero=False))
+        self.assertEqual(stats["tracked_count"], 1)
+
     def test_get_by_type(self):
         run_async(self.db.record("tool1", "tool"))
         run_async(self.db.record("tool2", "tool"))
@@ -191,6 +244,39 @@ class TestMCPStatDatabase(unittest.TestCase):
         result = run_async(self.db.get_catalog(query="news"))
         self.assertEqual(result["matched"], 1)
 
+    def test_catalog_with_limit(self):
+        """Test catalog with limit parameter."""
+        tools = [
+            {"name": "tool1", "tags": ["a"], "short_description": "T1"},
+            {"name": "tool2", "tags": ["a"], "short_description": "T2"},
+            {"name": "tool3", "tags": ["a"], "short_description": "T3"},
+        ]
+        run_async(self.db.sync_metadata(tools))
+
+        result = run_async(self.db.get_catalog(limit=2))
+        self.assertEqual(len(result["results"]), 2)
+
+    def test_catalog_without_usage(self):
+        """Test catalog with include_usage=False."""
+        tools = [{"name": "tool1", "tags": ["a"], "short_description": "T1"}]
+        run_async(self.db.sync_metadata(tools))
+
+        result = run_async(self.db.get_catalog(include_usage=False))
+        self.assertIsNone(result["results"][0]["call_count"])
+
+    def test_update_metadata(self):
+        """Test direct metadata update."""
+        run_async(self.db.update_metadata(
+            "test_tool",
+            tags=["tag1", "tag2"],
+            short_description="Short",
+            full_description="Full description"
+        ))
+
+        catalog = run_async(self.db.get_catalog())
+        self.assertEqual(catalog["total_tracked"], 1)
+        self.assertEqual(catalog["results"][0]["tags"], ["tag1", "tag2"])
+
 
 # ============================================================================
 # Core Tests
@@ -220,6 +306,33 @@ class TestMCPStat(unittest.TestCase):
         stats = run_async(self.stat.get_stats())
         self.assertEqual(stats["total_calls"], 3)
 
+    def test_record_with_failure(self):
+        """Test recording failed invocations."""
+        run_async(self.stat.record("tool1", "tool", success=False, error_msg="Test error"))
+        stats = run_async(self.stat.get_stats())
+        self.assertEqual(stats["total_calls"], 1)
+
+    def test_get_by_type(self):
+        """Test get_by_type method."""
+        run_async(self.stat.record("tool1", "tool"))
+        run_async(self.stat.record("prompt1", "prompt"))
+
+        result = run_async(self.stat.get_by_type())
+        self.assertIn("by_type", result)
+        self.assertIn("summary", result)
+
+    def test_get_catalog(self):
+        """Test get_catalog method."""
+        run_async(self.stat.register_metadata(
+            "test_tool",
+            tags=["api", "test"],
+            short_description="Test tool"
+        ))
+
+        catalog = run_async(self.stat.get_catalog(tags=["api"]))
+        self.assertIn("results", catalog)
+        self.assertIn("all_tags", catalog)
+
     def test_metadata_presets(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             stat = MCPStat(
@@ -242,6 +355,69 @@ class TestMCPStat(unittest.TestCase):
             self.assertIn("custom", tool["tags"])
             self.assertEqual(tool["short_description"], "Custom desc")
             stat.close()
+
+    def test_sync_tools_without_preset(self):
+        """Test sync_tools auto-generates tags when no preset."""
+        class MockTool:
+            name = "fetch_data"
+            description = "Fetch data from API"
+
+        run_async(self.stat.sync_tools([MockTool()]))
+        catalog = run_async(self.stat.get_catalog())
+
+        self.assertEqual(len(catalog["results"]), 1)
+        tool = catalog["results"][0]
+        self.assertIn("fetch_data", tool["tags"])
+
+    def test_add_preset(self):
+        """Test add_preset method."""
+        self.stat.add_preset("new_tool", tags=["custom"], short="Description")
+        self.assertIn("new_tool", self.stat.metadata_presets)
+
+    def test_register_metadata(self):
+        """Test manual metadata registration."""
+        run_async(self.stat.register_metadata(
+            "manual_tool",
+            tags=["manual", "test"],
+            short_description="Manually registered",
+            full_description="Full description here"
+        ))
+
+        catalog = run_async(self.stat.get_catalog())
+        self.assertEqual(len(catalog["results"]), 1)
+        self.assertEqual(catalog["results"][0]["name"], "manual_tool")
+
+    def test_env_var_log_enabled_true(self):
+        """Test MCPSTAT_LOG_ENABLED=true."""
+        import os
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            old_val = os.environ.get("MCPSTAT_LOG_ENABLED")
+            try:
+                os.environ["MCPSTAT_LOG_ENABLED"] = "true"
+                stat = MCPStat("test", db_path=str(Path(tmp_dir) / "test.sqlite"))
+                self.assertTrue(stat.log_enabled)
+                stat.close()
+            finally:
+                if old_val is None:
+                    os.environ.pop("MCPSTAT_LOG_ENABLED", None)
+                else:
+                    os.environ["MCPSTAT_LOG_ENABLED"] = old_val
+
+    def test_env_var_log_enabled_false(self):
+        """Test MCPSTAT_LOG_ENABLED=false."""
+        import os
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            old_val = os.environ.get("MCPSTAT_LOG_ENABLED")
+            try:
+                os.environ["MCPSTAT_LOG_ENABLED"] = "false"
+                stat = MCPStat("test", db_path=str(Path(tmp_dir) / "test.sqlite"))
+                self.assertFalse(stat.log_enabled)
+                stat.close()
+            finally:
+                if old_val is None:
+                    os.environ.pop("MCPSTAT_LOG_ENABLED", None)
+                else:
+                    os.environ["MCPSTAT_LOG_ENABLED"] = old_val
 
 
 # ============================================================================
@@ -283,6 +459,80 @@ class TestTools(unittest.TestCase):
         self.assertEqual(len(tools), 2)
         self.assertTrue(any(t["name"] == "get_tool_usage_stats" for t in tools))
         self.assertTrue(any(t["name"] == "get_tool_catalog" for t in tools))
+
+    def test_build_tool_definitions_custom_prefix(self):
+        """Test with custom prefix."""
+        tools = build_tool_definitions(prefix="fetch", server_name="my-server")
+        self.assertTrue(any(t["name"] == "fetch_tool_usage_stats" for t in tools))
+        self.assertTrue(any(t["name"] == "fetch_tool_catalog" for t in tools))
+
+
+class TestBuiltinToolsHandler(unittest.TestCase):
+    """Tests for BuiltinToolsHandler class."""
+
+    def setUp(self):
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self.stat = MCPStat(
+            "test-server",
+            db_path=str(Path(self._tmp_dir.name) / "test.sqlite"),
+            log_enabled=False,
+        )
+
+    def tearDown(self):
+        self.stat.close()
+        self._tmp_dir.cleanup()
+
+    def test_is_stats_tool(self):
+        """Test is_stats_tool detection."""
+        from mcpstat import BuiltinToolsHandler
+        handler = BuiltinToolsHandler(self.stat, prefix="get")
+        self.assertTrue(handler.is_stats_tool("get_tool_usage_stats"))
+        self.assertTrue(handler.is_stats_tool("get_tool_catalog"))
+        self.assertFalse(handler.is_stats_tool("other_tool"))
+
+    def test_handle_usage_stats(self):
+        """Test handling get_tool_usage_stats."""
+        from mcpstat import BuiltinToolsHandler
+        handler = BuiltinToolsHandler(self.stat, prefix="get")
+
+        run_async(self.stat.record("tool1", "tool"))
+        result = run_async(handler.handle("get_tool_usage_stats", {}))
+
+        self.assertIsNotNone(result)
+        self.assertIn("tracked_count", result)
+        self.assertIn("total_calls", result)
+
+    def test_handle_catalog(self):
+        """Test handling get_tool_catalog."""
+        from mcpstat import BuiltinToolsHandler
+        handler = BuiltinToolsHandler(self.stat, prefix="get")
+
+        # Register some metadata first
+        run_async(self.stat.register_metadata(
+            "test_tool",
+            tags=["api"],
+            short_description="Test"
+        ))
+        result = run_async(handler.handle("get_tool_catalog", {"tags": ["api"]}))
+
+        self.assertIsNotNone(result)
+        self.assertIn("total_tracked", result)
+        self.assertIn("results", result)
+
+    def test_handle_unknown_tool(self):
+        """Test handling unknown tool returns None."""
+        from mcpstat import BuiltinToolsHandler
+        handler = BuiltinToolsHandler(self.stat, prefix="get")
+
+        result = run_async(handler.handle("unknown_tool", {}))
+        self.assertIsNone(result)
+
+    def test_custom_prefix(self):
+        """Test handler with custom prefix."""
+        from mcpstat import BuiltinToolsHandler
+        handler = BuiltinToolsHandler(self.stat, prefix="stats")
+        self.assertTrue(handler.is_stats_tool("stats_tool_usage_stats"))
+        self.assertFalse(handler.is_stats_tool("get_tool_usage_stats"))
 
 
 if __name__ == "__main__":

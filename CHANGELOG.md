@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-01-17
+
+### Added
+
+- GitHub community files: CONTRIBUTING.md, SECURITY.md, issue/PR templates
+- Tags System documentation with filtering examples
+- Expanded API Reference with complete code examples
+- Test coverage improved
+
+### Changed
+
+- Improved README.md structure and navigation with collapsible MCP client configs
+- Enhanced llms.txt for better AI agent consumption
+
 ## [0.1.1] - 2026-01-16
 
 ### Fixed
@@ -37,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full type annotations with strict mypy compliance (`py.typed` marker included)
 - Comprehensive test suite
 
-[Unreleased]: https://github.com/tekkidev/mcpstat/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/tekkidev/mcpstat/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/tekkidev/mcpstat/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/tekkidev/mcpstat/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/tekkidev/mcpstat/releases/tag/v0.1.0

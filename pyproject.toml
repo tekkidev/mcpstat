@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "mcpstat"
-version = "0.1.1"
+version = "0.1.2"
 description = "Usage tracking, analytics, and file logging for MCP (Model Context Protocol) servers"
 authors = ["Vadim Bakhrenkov <hello@vadim.dev>"]
 license = "MIT"
@@ -49,11 +49,19 @@ include = [
     "LICENSE",
     "README.md",
     "llms.txt",
-    "examples/**/*",
+    "examples/**/*.py",
     "tests/**/*",
     "mcpstat/py.typed",
 ]
-exclude = ["**/__pycache__", "**/*.pyc", "**/*.egg-info"]
+exclude = [
+    "**/__pycache__",
+    "**/*.pyc",
+    "**/*.egg-info",
+    "**/*.sqlite",
+    "**/*.sqlite-wal",
+    "**/*.sqlite-shm",
+    "**/*.log",
+]
 
 [tool.poetry.urls]
 Changelog = "https://github.com/tekkidev/mcpstat/blob/main/CHANGELOG.md"
