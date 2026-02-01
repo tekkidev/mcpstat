@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MCPStat - Usage tracking and analytics for MCP servers.
+mcpstat - Usage tracking and analytics for MCP servers.
 https://github.com/tekkidev/mcpstat
 
 Copyright (c) 2026 Vadim Bakhrenkov
@@ -40,6 +40,7 @@ stat = MCPStat("temp-converter")  # That's it!
 # Tools
 # =============================================================================
 
+
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     tools = [
@@ -77,19 +78,17 @@ async def handle_tool(name: str, arguments: dict) -> list[TextContent]:
 
     if name == "celsius_to_fahrenheit":
         c = arguments.get("celsius", 0)
-        f = (c * 9/5) + 32
-        return [TextContent(type="text", text=json.dumps({
-            "celsius": c,
-            "fahrenheit": round(f, 2)
-        }))]
+        f = (c * 9 / 5) + 32
+        return [
+            TextContent(type="text", text=json.dumps({"celsius": c, "fahrenheit": round(f, 2)}))
+        ]
 
     if name == "fahrenheit_to_celsius":
         f = arguments.get("fahrenheit", 0)
-        c = (f - 32) * 5/9
-        return [TextContent(type="text", text=json.dumps({
-            "fahrenheit": f,
-            "celsius": round(c, 2)
-        }))]
+        c = (f - 32) * 5 / 9
+        return [
+            TextContent(type="text", text=json.dumps({"fahrenheit": f, "celsius": round(c, 2)}))
+        ]
 
     return [TextContent(type="text", text=json.dumps({"error": "Unknown tool"}))]
 
@@ -97,6 +96,7 @@ async def handle_tool(name: str, arguments: dict) -> list[TextContent]:
 # =============================================================================
 # Run
 # =============================================================================
+
 
 async def main():
     async with stdio_server() as (read, write):

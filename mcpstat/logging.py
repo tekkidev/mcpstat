@@ -1,5 +1,5 @@
 """
-MCPStat - Usage tracking and analytics for MCP servers.
+mcpstat - Usage tracking and analytics for MCP servers.
 https://github.com/tekkidev/mcpstat
 
 Copyright (c) 2026 Vadim Bakhrenkov
@@ -94,7 +94,7 @@ class MCPStatLogger:
     def log(
         self,
         name: str,
-        primitive_type: Literal['tool', 'prompt', 'resource'],
+        primitive_type: Literal["tool", "prompt", "resource"],
         *,
         success: bool = True,
         error_msg: str | None = None,

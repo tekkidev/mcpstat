@@ -1,5 +1,5 @@
 """
-MCPStat - Usage tracking and analytics for MCP servers.
+mcpstat - Usage tracking and analytics for MCP servers.
 https://github.com/tekkidev/mcpstat
 
 Copyright (c) 2026 Vadim Bakhrenkov
@@ -53,7 +53,7 @@ async def generate_stats_prompt(
         if not used:
             return "(None used yet)"
         return "\n".join(
-            f"{i+1}. `{item['name']}` - **{item['call_count']} calls**"
+            f"{i + 1}. `{item['name']}` - **{item['call_count']} calls**"
             for i, item in enumerate(used)
         )
 
@@ -78,33 +78,33 @@ async def generate_stats_prompt(
 
     if type_filter in ("all", "tool"):
         ts = summary.get("tool", {})
-        sections.append(f"""### 🔧 Tools ({ts.get('count', 0)} tracked, {ts.get('total_calls', 0)} calls)
+        sections.append(f"""### 🔧 Tools ({ts.get("count", 0)} tracked, {ts.get("total_calls", 0)} calls)
 
 **Top 5:**
-{format_top(by_type.get('tool', []))}
+{format_top(by_type.get("tool", []))}
 
 **Unused:**
-{format_unused(by_type.get('tool', []))}""")
+{format_unused(by_type.get("tool", []))}""")
 
     if type_filter in ("all", "resource"):
         rs = summary.get("resource", {})
-        sections.append(f"""### 📚 Resources ({rs.get('count', 0)} tracked, {rs.get('total_calls', 0)} calls)
+        sections.append(f"""### 📚 Resources ({rs.get("count", 0)} tracked, {rs.get("total_calls", 0)} calls)
 
 **Top 5:**
-{format_top(by_type.get('resource', []))}
+{format_top(by_type.get("resource", []))}
 
 **Unused:**
-{format_unused(by_type.get('resource', []))}""")
+{format_unused(by_type.get("resource", []))}""")
 
     if type_filter in ("all", "prompt"):
         ps = summary.get("prompt", {})
-        sections.append(f"""### 💬 Prompts ({ps.get('count', 0)} tracked, {ps.get('total_calls', 0)} calls)
+        sections.append(f"""### 💬 Prompts ({ps.get("count", 0)} tracked, {ps.get("total_calls", 0)} calls)
 
 **Top 5:**
-{format_top(by_type.get('prompt', []))}
+{format_top(by_type.get("prompt", []))}
 
 **Unused:**
-{format_unused(by_type.get('prompt', []))}""")
+{format_unused(by_type.get("prompt", []))}""")
 
     recs = ""
     if include_recommendations:

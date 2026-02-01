@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MCPStat - Usage tracking and analytics for MCP servers.
+mcpstat - Usage tracking and analytics for MCP servers.
 https://github.com/tekkidev/mcpstat
 
 Copyright (c) 2026 Vadim Bakhrenkov
@@ -205,15 +205,17 @@ async def list_resources() -> list[Resource]:
 async def read_resource(uri: str) -> str:
     """Read resource content with usage tracking."""
     # Extract resource name for tracking
-    resource_name = uri.split("/")[-1] if "/" in uri else uri
+    # Convert AnyUrl to string if needed (MCP SDK may pass AnyUrl instead of str)
+    uri_str = str(uri)
+    resource_name = uri_str.split("/")[-1] if "/" in uri_str else uri_str
     await stat.record(resource_name, "resource")
 
-    if uri == "resource://example-server/readme":
+    if uri_str == "resource://example-server/readme":
         if README_PATH.exists():
             return README_PATH.read_text(encoding="utf-8")
         return "# README not found\n\nThe README.md file was not found at the expected location."
 
-    if uri == "resource://example-server/tool-catalog":
+    if uri_str == "resource://example-server/tool-catalog":
         catalog = await stat.get_catalog(include_usage=True)
         lines = [
             "# Tool Catalog",
@@ -234,7 +236,7 @@ async def read_resource(uri: str) -> str:
             lines.append("")
         return "\n".join(lines)
 
-    raise ValueError(f"Unknown resource: {uri}")
+    raise ValueError(f"Unknown resource: {uri_str}")
 
 
 # =============================================================================

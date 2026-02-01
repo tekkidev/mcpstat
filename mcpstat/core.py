@@ -1,5 +1,5 @@
 """
-MCPStat - Usage tracking and analytics for MCP servers.
+mcpstat - Usage tracking and analytics for MCP servers.
 https://github.com/tekkidev/mcpstat
 
 Copyright (c) 2026 Vadim Bakhrenkov
@@ -137,20 +137,27 @@ class MCPStat:
     async def record(
         self,
         name: str,
-        primitive_type: Literal['tool', 'prompt', 'resource'] = "tool",
+        primitive_type: Literal["tool", "prompt", "resource"] = "tool",
         *,
         success: bool = True,
         error_msg: str | None = None,
+        response_chars: int | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
     ) -> None:
         """Record a tool/prompt/resource invocation.
 
         Call this at the START of handlers to guarantee 100% coverage.
+        Optionally pass response size or token counts for usage analytics.
 
         Args:
             name: Name of the primitive being invoked
             primitive_type: Type of MCP primitive
             success: Whether invocation succeeded
             error_msg: Error message for failures (logged only)
+            response_chars: Response size in characters (for token estimation)
+            input_tokens: Actual input token count (if known from LLM API)
+            output_tokens: Actual output token count (if known from LLM API)
 
         Example:
             ```python
@@ -158,6 +165,13 @@ class MCPStat:
             async def handle_tool(name: str, arguments: dict):
                 await stat.record(name, "tool")
                 # ... your logic
+
+            # With response tracking
+            result = my_tool_logic()
+            await stat.record(
+                name, "tool",
+                response_chars=len(str(result))
+            )
             ```
         """
         # File logging (if enabled)
@@ -165,10 +179,49 @@ class MCPStat:
 
         # SQLite tracking
         try:
-            await self._db.record(name, primitive_type)
+            await self._db.record(
+                name,
+                primitive_type,
+                response_chars=response_chars,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
         except Exception as exc:
             # Never fail the main flow due to tracking
             print(f"[mcpstat] SQLite tracking failed for {name}: {exc}", file=sys.stderr)
+
+    async def report_tokens(
+        self,
+        name: str,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> None:
+        """Report token usage for a previously recorded call.
+
+        Use this when actual token counts are available after the fact
+        (e.g., from LLM API response). This increments the cumulative
+        token counters without incrementing call_count.
+
+        Args:
+            name: Name of the tool/prompt/resource
+            input_tokens: Input token count from LLM API
+            output_tokens: Output token count from LLM API
+
+        Example:
+            ```python
+            # In your client code after LLM call
+            response = await anthropic.messages.create(...)
+            await stat.report_tokens(
+                tool_name,
+                response.usage.input_tokens,
+                response.usage.output_tokens
+            )
+            ```
+        """
+        try:
+            await self._db.report_tokens(name, input_tokens, output_tokens)
+        except Exception as exc:
+            print(f"[mcpstat] Token reporting failed for {name}: {exc}", file=sys.stderr)
 
     async def get_stats(
         self,
@@ -247,7 +300,11 @@ class MCPStat:
 
             if preset:
                 tags = normalize_tags(preset.get("tags", []))
-                short = preset.get("short") or preset.get("short_description") or derive_short_description(description, name)
+                short = (
+                    preset.get("short")
+                    or preset.get("short_description")
+                    or derive_short_description(description, name)
+                )
             else:
                 # Generate tags from name (filter stopwords for auto-generated)
                 generated = name.replace("-", " ").replace("_", " ").split()
@@ -257,12 +314,14 @@ class MCPStat:
             if not tags:
                 tags = [name.lower()]
 
-            tool_dicts.append({
-                "name": name,
-                "description": description or "",
-                "tags": tags,
-                "short_description": short,
-            })
+            tool_dicts.append(
+                {
+                    "name": name,
+                    "description": description or "",
+                    "tags": tags,
+                    "short_description": short,
+                }
+            )
 
         await self._db.sync_metadata(tool_dicts, cleanup_orphans=self.cleanup_orphans)
         self._tools_cache = tools
@@ -283,7 +342,11 @@ class MCPStat:
 
             if preset:
                 tags = normalize_tags(preset.get("tags", []))
-                short = preset.get("short") or preset.get("short_description") or derive_short_description(description, name)
+                short = (
+                    preset.get("short")
+                    or preset.get("short_description")
+                    or derive_short_description(description, name)
+                )
             else:
                 tags = normalize_tags([name, "prompt"], filter_stopwords=True)
                 short = derive_short_description(description, name)

@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "mcpstat"
-version = "0.1.2"
+version = "0.2.1"
 description = "Usage tracking, analytics, and file logging for MCP (Model Context Protocol) servers"
 authors = ["Vadim Bakhrenkov <hello@vadim.dev>"]
 license = "MIT"
@@ -18,13 +18,13 @@ keywords = [
     "analytics",
     "usage-tracking",
     "logging",
-    "telemetry",
     "ai",
     "llm",
     "agent",
     "mcp-server",
     "tool-tracking",
     "observability",
+    "token-tracking",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -49,6 +49,7 @@ include = [
     "LICENSE",
     "README.md",
     "llms.txt",
+    "docs/**/*.md",
     "examples/**/*.py",
     "tests/**/*",
     "mcpstat/py.typed",
@@ -86,7 +87,32 @@ all = ["mcp", "pytest", "pytest-asyncio", "pytest-cov", "mypy", "ruff"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-v --cov=mcpstat --cov-report=term-missing"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-v --cov=mcpstat --cov-branch --cov-report=term-missing"
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["mcpstat"]
+branch = true
+relative_files = true
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/.venv/*",
+    "*/venv/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "@abstractmethod",
+]
+show_missing = true
 
 [tool.mypy]
 python_version = "3.12"
@@ -94,7 +120,7 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 strict = true
-exclude = ["examples/"]
+exclude = ["examples/", "tests/"]
 
 [tool.ruff]
 target-version = "py312"
@@ -123,3 +149,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["mcpstat"]
+
+[tool.bandit]
+exclude_dirs = ["tests", "examples"]
+skips = ["B101"]  # assert_used - acceptable in tests

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-02-01
+
+### Added
+
+- **Token Tracking**: New feature to track response sizes and estimate token usage
+  - `response_chars` parameter in `record()` for automatic token estimation
+  - `input_tokens` and `output_tokens` parameters for actual token tracking
+  - New `report_tokens()` method for deferred token reporting
+  - Token summary in `get_stats()` response with totals and averages
+- **Schema Migration**: Automatic database migration from v1 to v2
+  - Adds token tracking columns with backward compatibility
+  - Preserves all existing data
+- **Documentation**: Added new and updated guides, API references, and examples
+
+### Changed
+
+- Database schema bumped to v2 with new columns:
+  - `total_input_tokens`, `total_output_tokens`
+  - `total_response_chars`, `estimated_tokens`
+- `get_stats()` response now includes `token_summary` object
+- Each stat item now includes token fields and `avg_tokens_per_call`
+
 ## [0.1.2] - 2026-01-17
 
 ### Added
@@ -51,7 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full type annotations with strict mypy compliance (`py.typed` marker included)
 - Comprehensive test suite
 
-[Unreleased]: https://github.com/tekkidev/mcpstat/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/tekkidev/mcpstat/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/tekkidev/mcpstat/compare/v0.1.2...v0.2.1
 [0.1.2]: https://github.com/tekkidev/mcpstat/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/tekkidev/mcpstat/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/tekkidev/mcpstat/releases/tag/v0.1.0

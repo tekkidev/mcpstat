@@ -1,5 +1,5 @@
 """
-MCPStat - Usage tracking and analytics for MCP servers.
+mcpstat - Usage tracking and analytics for MCP servers.
 https://github.com/tekkidev/mcpstat
 
 Copyright (c) 2026 Vadim Bakhrenkov
@@ -19,11 +19,37 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 # Common stopwords to filter from auto-generated tags
-_STOPWORDS = frozenset({
-    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from",
-    "get", "has", "have", "in", "is", "it", "its", "of", "on", "or",
-    "that", "the", "this", "to", "was", "will", "with",
-})
+_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "for",
+        "from",
+        "get",
+        "has",
+        "have",
+        "in",
+        "is",
+        "it",
+        "its",
+        "of",
+        "on",
+        "or",
+        "that",
+        "the",
+        "this",
+        "to",
+        "was",
+        "will",
+        "with",
+    }
+)
 
 
 def normalize_tags(tags: Iterable[str], *, filter_stopwords: bool = False) -> list[str]:

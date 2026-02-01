@@ -1,5 +1,5 @@
 """
-MCPStat - Usage tracking and analytics for MCP servers.
+mcpstat - Usage tracking and analytics for MCP servers.
 https://github.com/tekkidev/mcpstat
 
 Copyright (c) 2026 Vadim Bakhrenkov
@@ -27,7 +27,13 @@ if TYPE_CHECKING:
     from typing import Literal
 
 # Schema version for migrations
-SCHEMA_VERSION = 1
+# v1: Initial schema
+# v2: Added token tracking columns (total_input_tokens, total_output_tokens,
+#     total_response_chars, estimated_tokens)
+SCHEMA_VERSION = 2
+
+# Token estimation: ~3.5 characters per token (conservative for mixed content)
+CHARS_PER_TOKEN = 3.5
 
 
 class MCPStatDatabase:
@@ -84,11 +90,33 @@ class MCPStatDatabase:
         finally:
             conn.close()
 
+    def _migrate_to_v2(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema to v2: Add token tracking columns.
+
+        Safe to run multiple times - checks for existing columns.
+        """
+        # Get existing columns in mcpstat_usage
+        cursor = conn.execute("PRAGMA table_info(mcpstat_usage)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+
+        # Columns to add for token tracking
+        new_columns = [
+            ("total_input_tokens", "INTEGER NOT NULL DEFAULT 0"),
+            ("total_output_tokens", "INTEGER NOT NULL DEFAULT 0"),
+            ("total_response_chars", "INTEGER NOT NULL DEFAULT 0"),
+            ("estimated_tokens", "INTEGER NOT NULL DEFAULT 0"),
+        ]
+
+        for col_name, col_def in new_columns:
+            if col_name not in existing_cols:
+                conn.execute(f"ALTER TABLE mcpstat_usage ADD COLUMN {col_name} {col_def}")
+
     def _ensure_schema(self) -> None:
         """Create database schema if not exists.
 
         Idempotent - safe to call multiple times.
         Called automatically before first operation.
+        Handles migrations for schema updates.
         """
         if self._initialized:
             return
@@ -109,7 +137,11 @@ class MCPStatDatabase:
                     type TEXT NOT NULL DEFAULT 'tool',
                     call_count INTEGER NOT NULL DEFAULT 0,
                     last_accessed TEXT NOT NULL,
-                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    total_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_output_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_response_chars INTEGER NOT NULL DEFAULT 0,
+                    estimated_tokens INTEGER NOT NULL DEFAULT 0
                 )
             """)
 
@@ -135,6 +167,9 @@ class MCPStatDatabase:
                 ON mcpstat_usage(call_count DESC)
             """)
 
+            # Run migrations for existing databases
+            self._migrate_to_v2(conn)
+
             conn.commit()
 
         self._initialized = True
@@ -142,31 +177,91 @@ class MCPStatDatabase:
     async def record(
         self,
         name: str,
-        primitive_type: Literal['tool', 'prompt', 'resource'] = "tool",
+        primitive_type: Literal["tool", "prompt", "resource"] = "tool",
+        *,
+        response_chars: int | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
     ) -> None:
-        """Record a primitive invocation.
+        """Record a primitive invocation with optional token tracking.
 
         Uses INSERT ... ON CONFLICT for atomic upsert.
 
         Args:
             name: Name of the tool/prompt/resource
             primitive_type: MCP primitive type
+            response_chars: Size of response in characters (for token estimation)
+            input_tokens: Actual input token count (from LLM provider)
+            output_tokens: Actual output token count (from LLM provider)
         """
         self._ensure_schema()
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+        # Calculate estimated tokens from response size
+        est_tokens = 0
+        if response_chars is not None and response_chars > 0:
+            est_tokens = max(1, int(response_chars / CHARS_PER_TOKEN))
 
         async with self._get_lock():
             with self._connect() as conn:
                 conn.execute(
                     """
-                    INSERT INTO mcpstat_usage (name, type, call_count, last_accessed, created_at)
-                    VALUES (?, ?, 1, ?, ?)
+                    INSERT INTO mcpstat_usage (
+                        name, type, call_count, last_accessed, created_at,
+                        total_input_tokens, total_output_tokens,
+                        total_response_chars, estimated_tokens
+                    )
+                    VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(name) DO UPDATE SET
                         call_count = call_count + 1,
                         last_accessed = excluded.last_accessed,
-                        type = excluded.type
+                        type = excluded.type,
+                        total_input_tokens = total_input_tokens + excluded.total_input_tokens,
+                        total_output_tokens = total_output_tokens + excluded.total_output_tokens,
+                        total_response_chars = total_response_chars + excluded.total_response_chars,
+                        estimated_tokens = estimated_tokens + excluded.estimated_tokens
                     """,
-                    (name, primitive_type, now, now),
+                    (
+                        name,
+                        primitive_type,
+                        now,
+                        now,
+                        input_tokens or 0,
+                        output_tokens or 0,
+                        response_chars or 0,
+                        est_tokens,
+                    ),
+                )
+                conn.commit()
+
+    async def report_tokens(
+        self,
+        name: str,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> None:
+        """Report token usage for an existing record.
+
+        Use this when you have actual token counts from the LLM provider
+        and want to add them to an existing usage record.
+
+        Args:
+            name: Name of the tool/prompt/resource
+            input_tokens: Input token count from LLM provider
+            output_tokens: Output token count from LLM provider
+        """
+        self._ensure_schema()
+
+        async with self._get_lock():
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    UPDATE mcpstat_usage
+                    SET total_input_tokens = total_input_tokens + ?,
+                        total_output_tokens = total_output_tokens + ?
+                    WHERE name = ?
+                    """,
+                    (input_tokens, output_tokens, name),
                 )
                 conn.commit()
 
@@ -204,14 +299,17 @@ class MCPStatDatabase:
 
                 where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
+                # Safe: where clause constructed from enum/bool params, not user input
                 query = f"""
                     SELECT u.name, u.type, u.call_count, u.last_accessed,
+                           u.total_input_tokens, u.total_output_tokens,
+                           u.total_response_chars, u.estimated_tokens,
                            m.tags, m.short_description, m.full_description
                     FROM mcpstat_usage u
                     LEFT JOIN mcpstat_metadata m ON u.name = m.name
                     {where}
                     ORDER BY u.call_count DESC, u.last_accessed DESC
-                """
+                """  # nosec B608
 
                 if limit:
                     query += " LIMIT ?"
@@ -223,6 +321,9 @@ class MCPStatDatabase:
         stats: list[dict[str, Any]] = []
         total_calls = 0
         zero_count = 0
+        total_input_tokens = 0
+        total_output_tokens = 0
+        total_estimated_tokens = 0
 
         for row in rows:
             count = row["call_count"] or 0
@@ -230,15 +331,39 @@ class MCPStatDatabase:
             if count == 0:
                 zero_count += 1
 
-            stats.append({
-                "name": row["name"],
-                "type": row["type"],
-                "call_count": count,
-                "last_accessed": row["last_accessed"],
-                "tags": parse_tags_string(row["tags"]),
-                "short_description": row["short_description"],
-                "full_description": row["full_description"],
-            })
+            input_tokens = row["total_input_tokens"] or 0
+            output_tokens = row["total_output_tokens"] or 0
+            estimated = row["estimated_tokens"] or 0
+
+            total_input_tokens += input_tokens
+            total_output_tokens += output_tokens
+            total_estimated_tokens += estimated
+
+            # Calculate average tokens per call
+            avg_tokens = 0
+            if count > 0:
+                actual_total = input_tokens + output_tokens
+                if actual_total > 0:
+                    avg_tokens = actual_total // count
+                elif estimated > 0:
+                    avg_tokens = estimated // count
+
+            stats.append(
+                {
+                    "name": row["name"],
+                    "type": row["type"],
+                    "call_count": count,
+                    "last_accessed": row["last_accessed"],
+                    "tags": parse_tags_string(row["tags"]),
+                    "short_description": row["short_description"],
+                    "full_description": row["full_description"],
+                    "total_input_tokens": input_tokens,
+                    "total_output_tokens": output_tokens,
+                    "total_response_chars": row["total_response_chars"] or 0,
+                    "estimated_tokens": estimated,
+                    "avg_tokens_per_call": avg_tokens,
+                }
+            )
 
         latest = max((s["last_accessed"] for s in stats if s["last_accessed"]), default=None)
 
@@ -247,6 +372,12 @@ class MCPStatDatabase:
             "total_calls": total_calls,
             "zero_count": zero_count,
             "latest_access": latest,
+            "token_summary": {
+                "total_input_tokens": total_input_tokens,
+                "total_output_tokens": total_output_tokens,
+                "total_estimated_tokens": total_estimated_tokens,
+                "has_actual_tokens": total_input_tokens > 0 or total_output_tokens > 0,
+            },
             "stats": stats,
         }
 
@@ -337,7 +468,14 @@ class MCPStatDatabase:
                         schema_version = excluded.schema_version,
                         updated_at = excluded.updated_at
                     """,
-                    (name, tags_to_string(tags), short_description, full_description or "", SCHEMA_VERSION, now),
+                    (
+                        name,
+                        tags_to_string(tags),
+                        short_description,
+                        full_description or "",
+                        SCHEMA_VERSION,
+                        now,
+                    ),
                 )
                 conn.commit()
 
@@ -403,10 +541,14 @@ class MCPStatDatabase:
                 if cleanup_orphans:
                     orphans = set(existing.keys()) - tool_names
                     if orphans:
+                        # Safe: placeholders are ? markers, values passed via tuple
                         placeholders = ",".join("?" * len(orphans))
-                        conn.execute(f"DELETE FROM mcpstat_metadata WHERE name IN ({placeholders})", tuple(orphans))
                         conn.execute(
-                            f"DELETE FROM mcpstat_usage WHERE name IN ({placeholders}) AND type='tool'",
+                            f"DELETE FROM mcpstat_metadata WHERE name IN ({placeholders})",  # nosec B608
+                            tuple(orphans),
+                        )
+                        conn.execute(
+                            f"DELETE FROM mcpstat_usage WHERE name IN ({placeholders}) AND type='tool'",  # nosec B608
                             tuple(orphans),
                         )
 
@@ -475,12 +617,14 @@ class MCPStatDatabase:
 
             # Text search
             if query_text:
-                haystack = " ".join([
-                    entry["name"],
-                    " ".join(entry["tags"]),
-                    entry["short_description"] or "",
-                    entry["full_description"] or "",
-                ]).lower()
+                haystack = " ".join(
+                    [
+                        entry["name"],
+                        " ".join(entry["tags"]),
+                        entry["short_description"] or "",
+                        entry["full_description"] or "",
+                    ]
+                ).lower()
                 if query_text not in haystack:
                     continue
 

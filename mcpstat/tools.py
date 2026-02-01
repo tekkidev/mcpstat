@@ -1,5 +1,5 @@
 """
-MCPStat - Usage tracking and analytics for MCP servers.
+mcpstat - Usage tracking and analytics for MCP servers.
 https://github.com/tekkidev/mcpstat
 
 Copyright (c) 2026 Vadim Bakhrenkov
@@ -58,7 +58,7 @@ def build_tool_definitions(
         },
         {
             "name": f"{prefix}_tool_catalog",
-            "description": f"List {server_name} tools with tags, usage telemetry, and text search",
+            "description": f"List {server_name} tools with tags, usage statistics, and text search",
             "inputSchema": {
                 "type": "object",
                 "properties": {

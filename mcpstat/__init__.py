@@ -1,5 +1,5 @@
 """
-MCPStat - Usage tracking and analytics for MCP servers.
+mcpstat - Usage tracking and analytics for MCP servers.
 https://github.com/tekkidev/mcpstat
 
 Copyright (c) 2026 Vadim Bakhrenkov
@@ -25,13 +25,13 @@ async def handle_tool(name: str, arguments: dict):
 
 ## Features
 
-- 📊 SQLite-backed usage tracking for tools, prompts, resources
-- 📝 Optional file-based audit logging
-- 🔧 Built-in stats query functions
-- 💬 Stats prompt generator for LLM consumption
-- 🏷️ Metadata enrichment (tags, descriptions)
-- ⚡ Async-first, thread-safe design
-- 🔒 No required dependencies (pure Python stdlib)
+- SQLite-backed usage tracking for tools, prompts, resources
+- Optional file-based audit logging
+- Built-in stats query functions
+- Stats prompt generator for LLM consumption
+- Metadata enrichment (tags, descriptions)
+- Async-first, thread-safe design
+- No required dependencies (pure Python stdlib)
 
 ## Configuration
 
@@ -57,7 +57,7 @@ Environment variables (optional override):
 
 from __future__ import annotations
 
-__version__ = "0.1.2"
+__version__ = "0.2.1"
 __author__ = "Vadim Bakhrenkov"
 __license__ = "MIT"
 
