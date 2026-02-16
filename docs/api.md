@@ -15,10 +15,12 @@ from mcpstat import MCPStat
 
 stat = MCPStat(
     server_name: str,
+    *,
     db_path: str | None = None,
     log_path: str | None = None,
-    log_enabled: bool = False,
+    log_enabled: bool | None = None,
     metadata_presets: dict[str, dict] | None = None,
+    cleanup_orphans: bool = True,
 )
 ```
 
@@ -29,14 +31,57 @@ stat = MCPStat(
 | `log_path` | `str` | `./mcp_stat.log` | File log path |
 | `log_enabled` | `bool` | `False` | Enable file logging |
 | `metadata_presets` | `dict` | `None` | Pre-defined metadata |
+| `cleanup_orphans` | `bool` | `True` | Remove metadata for unregistered tools on sync |
 
 ---
 
 ## Core Methods
 
+### @stat.track (Recommended)
+
+Decorator that automatically tracks tool calls with latency measurement.
+
+```python
+@app.call_tool()
+@stat.track  # ← One decorator does everything!
+async def handle_tool(name: str, arguments: dict):
+    return await my_logic(arguments)
+```
+
+**Features:**
+
+- Automatically measures execution time
+- Records call count
+- Tracks success/failure
+- Never fails user code (errors suppressed)
+- Works with exceptions (still records the call)
+
+**With explicit type:**
+
+```python
+@stat.track(primitive_type="prompt")
+async def handle_prompt(name: str, arguments: dict):
+    return await generate_prompt(arguments)
+```
+
+---
+
+### stat.tracking() Context Manager
+
+For cases where you need more control than a decorator:
+
+```python
+async def handle_tool(name: str, arguments: dict):
+    async with stat.tracking(name, "tool"):
+        result = await my_logic(arguments)
+        return result
+```
+
+---
+
 ### record()
 
-Record a tool, prompt, or resource invocation.
+Low-level method for manual recording. Use `@stat.track` instead when possible.
 
 ```python
 await stat.record(
@@ -48,6 +93,7 @@ await stat.record(
     response_chars: int | None = None,
     input_tokens: int | None = None,
     output_tokens: int | None = None,
+    duration_ms: int | None = None,
 )
 ```
 
@@ -60,18 +106,10 @@ await stat.record(
 | `response_chars` | `int` | Response size for token estimation |
 | `input_tokens` | `int` | Actual input token count |
 | `output_tokens` | `int` | Actual output token count |
+| `duration_ms` | `int` | Execution duration in milliseconds |
 
-> **Critical**: Always call `record()` as the **FIRST line** in your handlers to guarantee 100% tracking coverage.
-
-**Example:**
-
-```python
-@app.call_tool()
-async def handle_tool(name: str, arguments: dict):
-    await stat.record(name, "tool")  # FIRST LINE
-    result = await my_logic(arguments)
-    return result
-```
+!!! note "When to use record()"
+    Use `record()` directly only when you need to pass additional data like `response_chars` or `input_tokens`. For basic tracking with automatic latency, use `@stat.track` (decorator) or `stat.tracking()` (context manager) instead.
 
 ---
 
@@ -108,6 +146,10 @@ stats = await stat.get_stats(
         "total_estimated_tokens": int,
         "has_actual_tokens": bool,
     },
+    "latency_summary": {
+        "total_duration_ms": int,
+        "has_latency_data": bool,
+    },
     "stats": [
         {
             "name": str,
@@ -116,10 +158,16 @@ stats = await stat.get_stats(
             "last_accessed": str | None,
             "tags": list[str],
             "short_description": str | None,
+            "full_description": str | None,
             "total_input_tokens": int,
             "total_output_tokens": int,
+            "total_response_chars": int,
             "estimated_tokens": int,
             "avg_tokens_per_call": int,
+            "total_duration_ms": int,
+            "min_duration_ms": int | None,
+            "max_duration_ms": int | None,
+            "avg_latency_ms": int,
         }
     ]
 }
@@ -148,7 +196,8 @@ catalog = await stat.get_catalog(
 | `include_usage` | `bool` | Include call counts |
 | `limit` | `int` | Maximum results |
 
-> **AND Logic**: Tag filtering uses AND logic - tools must have **all** specified tags.
+!!! info "AND Logic"
+    Tag filtering uses AND logic - tools must have **all** specified tags.
 
 **Returns:**
 
@@ -161,12 +210,18 @@ catalog = await stat.get_catalog(
         "tags": list[str],
         "query": str | None,
     },
+    "include_usage": bool,
+    "limit": int | None,
+    "total_calls": int | None,   # None when include_usage=False
     "results": [
         {
             "name": str,
             "tags": list[str],
             "short_description": str | None,
-            "call_count": int,
+            "full_description": str | None,
+            "schema_version": int,
+            "updated_at": str,
+            "call_count": int | None,   # None when include_usage=False
             "last_accessed": str | None,
         }
     ]
@@ -227,14 +282,50 @@ await stat.sync_tools(tools)
 
 ### register_metadata()
 
-Manually register metadata for a tool.
+Manually register metadata for a primitive.
 
 ```python
 await stat.register_metadata(
     name: str,
-    tags: list[str] | None = None,
-    short_description: str | None = None,
+    *,
+    tags: list[str],
+    short_description: str,
     full_description: str | None = None,
+)
+```
+
+---
+
+### sync_prompts()
+
+Sync metadata from MCP Prompt objects.
+
+```python
+await stat.sync_prompts(prompts: list[Prompt])
+```
+
+---
+
+### sync_resources()
+
+Sync metadata from MCP Resource objects.
+
+```python
+await stat.sync_resources(resources: list[Resource])
+```
+
+---
+
+### add_preset()
+
+Add a metadata preset for future sync operations.
+
+```python
+stat.add_preset(
+    name: str,
+    *,
+    tags: list[str],
+    short: str,
 )
 ```
 
@@ -242,18 +333,35 @@ await stat.register_metadata(
 
 ### get_by_type()
 
-Get call counts grouped by type.
+Get usage statistics grouped by MCP primitive type.
 
 ```python
-counts = await stat.get_by_type()
-# {"tool": 15, "prompt": 3, "resource": 2}
+data = await stat.get_by_type()
+```
+
+**Returns:**
+
+```python
+{
+    "by_type": {
+        "tool": [{"name": str, "type": str, "call_count": int, "last_accessed": str}],
+        "prompt": [...],
+        "resource": [...],
+    },
+    "summary": {
+        "tool": {"count": int, "total_calls": int},
+        ...
+    },
+    "total_calls": int,
+    "total_items": int,
+}
 ```
 
 ---
 
 ### close()
 
-Explicit cleanup (usually automatic).
+Release resources. Call during server shutdown for clean resource release.
 
 ```python
 stat.close()
@@ -272,7 +380,7 @@ from mcpstat import build_tool_definitions
 
 tools = build_tool_definitions(
     prefix: str = "get",
-    server_name: str | None = None,
+    server_name: str = "MCP server",
 )
 ```
 
@@ -315,7 +423,10 @@ Generate MCP prompt schema for stats prompt.
 ```python
 from mcpstat import build_prompt_definition
 
-prompt = build_prompt_definition(server_name="my-server")
+prompt = build_prompt_definition(
+    prompt_name: str,
+    server_name: str = "MCP server",
+)
 ```
 
 ---
@@ -327,7 +438,25 @@ Generate prompt content with current stats.
 ```python
 from mcpstat import generate_stats_prompt
 
-content = await generate_stats_prompt(stat, server_name="my-server")
+content = await generate_stats_prompt(
+    stat,
+    *,
+    period: str = "all time",
+    type_filter: str = "all",
+    include_recommendations: bool = True,
+)
+```
+
+---
+
+### handle_stats_prompt()
+
+Handle stats prompt request from MCP client.
+
+```python
+from mcpstat.prompts import handle_stats_prompt
+
+result = await handle_stats_prompt(stat, arguments={"period": "past week"})
 ```
 
 ---

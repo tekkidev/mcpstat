@@ -12,6 +12,9 @@ from pathlib import Path
 
 import pytest
 
+# Import mcpstat to ensure coverage tracking works when running doc tests alone
+import mcpstat  # noqa: F401
+
 
 class TestDocumentation:
     """Tests for documentation files."""
@@ -89,7 +92,8 @@ class TestDocumentation:
         content = quickstart_path.read_text()
 
         assert "MCPStat" in content, "quickstart should mention MCPStat class"
-        assert "stat.record" in content, "quickstart should mention stat.record()"
+        assert "stat.track" in content, "quickstart should mention stat.track"
+        assert "stat.tracking" in content, "quickstart should mention stat.tracking()"
 
     def test_api_doc_has_methods(self, docs_path: Path) -> None:
         """Test that API docs mention key methods."""

@@ -13,8 +13,12 @@ All configuration is passed at initialization time.
 
 from __future__ import annotations
 
+import contextlib
+import functools
 import os
 import sys
+import time
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 from mcpstat.database import MCPStatDatabase
@@ -22,7 +26,11 @@ from mcpstat.logging import MCPStatLogger
 from mcpstat.utils import derive_short_description, normalize_tags
 
 if TYPE_CHECKING:
-    from typing import Literal
+    from collections.abc import AsyncIterator, Awaitable, Callable
+    from typing import Literal, ParamSpec, TypeVar
+
+    P = ParamSpec("P")
+    T = TypeVar("T")
 
 # Default paths - descriptive names for discoverability
 DEFAULT_DB_PATH = "./mcp_stat_data.sqlite"
@@ -144,11 +152,12 @@ class MCPStat:
         response_chars: int | None = None,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
+        duration_ms: int | None = None,
     ) -> None:
         """Record a tool/prompt/resource invocation.
 
         Call this at the START of handlers to guarantee 100% coverage.
-        Optionally pass response size or token counts for usage analytics.
+        Optionally pass response size, token counts, or duration for analytics.
 
         Args:
             name: Name of the primitive being invoked
@@ -158,6 +167,7 @@ class MCPStat:
             response_chars: Response size in characters (for token estimation)
             input_tokens: Actual input token count (if known from LLM API)
             output_tokens: Actual output token count (if known from LLM API)
+            duration_ms: Execution duration in milliseconds
 
         Example:
             ```python
@@ -166,11 +176,15 @@ class MCPStat:
                 await stat.record(name, "tool")
                 # ... your logic
 
-            # With response tracking
+            # With response and latency tracking
+            import time
+            start = time.perf_counter()
             result = my_tool_logic()
+            duration_ms = int((time.perf_counter() - start) * 1000)
             await stat.record(
                 name, "tool",
-                response_chars=len(str(result))
+                response_chars=len(str(result)),
+                duration_ms=duration_ms
             )
             ```
         """
@@ -185,6 +199,7 @@ class MCPStat:
                 response_chars=response_chars,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                duration_ms=duration_ms,
             )
         except Exception as exc:
             # Never fail the main flow due to tracking
@@ -425,6 +440,130 @@ class MCPStat:
             short: Short description
         """
         self.metadata_presets[name] = {"tags": tags, "short": short}
+
+    def track(
+        self,
+        func: Callable[P, Awaitable[T]] | None = None,
+        *,
+        primitive_type: Literal["tool", "prompt", "resource"] = "tool",
+    ) -> (
+        Callable[P, Awaitable[T]] | Callable[[Callable[P, Awaitable[T]]], Callable[P, Awaitable[T]]]
+    ):
+        """Decorator that automatically tracks tool calls with latency.
+
+        Wraps an async handler function to automatically record:
+        - Call count
+        - Execution time (latency)
+        - Response size (optional, from return value)
+
+        Can be used with or without parentheses:
+
+        Example:
+            ```python
+            # Simple usage - tracks latency automatically
+            @app.call_tool()
+            @stat.track
+            async def handle_tool(name: str, arguments: dict):
+                return await my_logic(arguments)
+
+            # With explicit type
+            @app.call_tool()
+            @stat.track(primitive_type="tool")
+            async def handle_tool(name: str, arguments: dict):
+                return await my_logic(arguments)
+            ```
+
+        Args:
+            func: The async function to wrap (when used without parentheses)
+            primitive_type: Type of MCP primitive (tool/prompt/resource)
+
+        Returns:
+            Decorated function that tracks execution
+        """
+
+        def decorator(fn: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
+            @functools.wraps(fn)
+            async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+                # Extract name from first positional arg (MCP convention)
+                name = args[0] if args else kwargs.get("name", fn.__name__)
+                if not isinstance(name, str):
+                    name = fn.__name__
+
+                start = time.perf_counter()
+                error_msg: str | None = None
+                success = True
+
+                try:
+                    result = await fn(*args, **kwargs)
+                    return result
+                except Exception as exc:
+                    success = False
+                    error_msg = str(exc)
+                    raise
+                finally:
+                    duration_ms = int((time.perf_counter() - start) * 1000)
+                    with contextlib.suppress(Exception):  # nosec B110
+                        await self.record(
+                            name,
+                            primitive_type,
+                            success=success,
+                            error_msg=error_msg,
+                            duration_ms=duration_ms,
+                        )
+
+            return wrapper
+
+        # Handle both @stat.track and @stat.track() syntax
+        if func is not None:
+            return decorator(func)
+        return decorator
+
+    @asynccontextmanager
+    async def tracking(
+        self,
+        name: str,
+        primitive_type: Literal["tool", "prompt", "resource"] = "tool",
+    ) -> AsyncIterator[None]:
+        """Context manager for tracking execution with automatic latency measurement.
+
+        Use this when you need more control than the @track decorator provides,
+        or when working with code that doesn't fit the decorator pattern.
+
+        Example:
+            ```python
+            async def handle_tool(name: str, arguments: dict):
+                async with stat.tracking(name, "tool"):
+                    result = await my_logic(arguments)
+                    return result
+            ```
+
+        Args:
+            name: Name of the tool/prompt/resource
+            primitive_type: Type of MCP primitive
+
+        Yields:
+            None - tracking happens on context exit
+        """
+        start = time.perf_counter()
+        error_msg: str | None = None
+        success = True
+
+        try:
+            yield
+        except Exception as exc:
+            success = False
+            error_msg = str(exc)
+            raise
+        finally:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            with contextlib.suppress(Exception):  # nosec B110
+                await self.record(
+                    name,
+                    primitive_type,
+                    success=success,
+                    error_msg=error_msg,
+                    duration_ms=duration_ms,
+                )
 
     def close(self) -> None:
         """Release resources.

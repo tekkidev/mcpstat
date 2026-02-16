@@ -411,12 +411,126 @@ class TestTokenTracking:
         assert tool_stat2["avg_tokens_per_call"] == 150
 
 
-class TestSchemaMigration:
-    """Tests for schema migration from v1 to v2."""
+# ============================================================================
+# Latency Tracking Tests
+# ============================================================================
+
+
+class TestLatencyTracking:
+    """Tests for latency tracking functionality."""
 
     @pytest.mark.asyncio
-    async def test_migration_adds_columns(self):
-        """Test that v1 databases are migrated to v2."""
+    async def test_record_with_duration(self, db_fixture):
+        """Test recording execution duration."""
+        db = db_fixture
+        await db.record("tool1", "tool", duration_ms=150)
+
+        stats = await db.get_stats()
+        tool_stat = stats["stats"][0]
+
+        assert tool_stat["total_duration_ms"] == 150
+        assert tool_stat["min_duration_ms"] == 150
+        assert tool_stat["max_duration_ms"] == 150
+        assert tool_stat["avg_latency_ms"] == 150
+
+    @pytest.mark.asyncio
+    async def test_cumulative_latency_tracking(self, db_fixture):
+        """Test that latency accumulates across calls."""
+        db = db_fixture
+        await db.record("tool1", "tool", duration_ms=100)
+        await db.record("tool1", "tool", duration_ms=200)
+        await db.record("tool1", "tool", duration_ms=150)
+
+        stats = await db.get_stats()
+        tool_stat = stats["stats"][0]
+
+        assert tool_stat["call_count"] == 3
+        assert tool_stat["total_duration_ms"] == 450
+        assert tool_stat["min_duration_ms"] == 100
+        assert tool_stat["max_duration_ms"] == 200
+        assert tool_stat["avg_latency_ms"] == 150
+
+    @pytest.mark.asyncio
+    async def test_latency_summary(self, db_fixture):
+        """Test latency_summary in get_stats response."""
+        db = db_fixture
+        await db.record("tool1", "tool", duration_ms=100)
+        await db.record("tool2", "tool", duration_ms=200)
+
+        stats = await db.get_stats()
+
+        assert "latency_summary" in stats
+        summary = stats["latency_summary"]
+        assert summary["total_duration_ms"] == 300
+        assert summary["has_latency_data"]
+
+    @pytest.mark.asyncio
+    async def test_latency_without_data(self, db_fixture):
+        """Test stats when no latency data is recorded."""
+        db = db_fixture
+        await db.record("tool1", "tool")  # No duration_ms
+
+        stats = await db.get_stats()
+        tool_stat = stats["stats"][0]
+
+        assert tool_stat["total_duration_ms"] == 0
+        assert tool_stat["min_duration_ms"] is None
+        assert tool_stat["max_duration_ms"] is None
+        assert tool_stat["avg_latency_ms"] == 0
+        assert not stats["latency_summary"]["has_latency_data"]
+
+    @pytest.mark.asyncio
+    async def test_latency_with_mixed_calls(self, db_fixture):
+        """Test latency when some calls have duration and some don't."""
+        db = db_fixture
+        await db.record("tool1", "tool")  # No duration
+        await db.record("tool1", "tool", duration_ms=100)  # With duration
+        await db.record("tool1", "tool", duration_ms=200)  # With duration
+
+        stats = await db.get_stats()
+        tool_stat = stats["stats"][0]
+
+        assert tool_stat["call_count"] == 3
+        assert tool_stat["total_duration_ms"] == 300
+        assert tool_stat["min_duration_ms"] == 100
+        assert tool_stat["max_duration_ms"] == 200
+        # Average is 300 / 3 = 100 (includes all calls, not just timed ones)
+        assert tool_stat["avg_latency_ms"] == 100
+
+    @pytest.mark.asyncio
+    async def test_latency_negative_ignored(self, db_fixture):
+        """Test that negative duration values are ignored."""
+        db = db_fixture
+        await db.record("tool1", "tool", duration_ms=-100)
+
+        stats = await db.get_stats()
+        tool_stat = stats["stats"][0]
+
+        assert tool_stat["total_duration_ms"] == 0
+        assert tool_stat["min_duration_ms"] is None
+
+    @pytest.mark.asyncio
+    async def test_latency_zero_duration(self, db_fixture):
+        """Test recording zero duration (very fast calls)."""
+        db = db_fixture
+        await db.record("tool1", "tool", duration_ms=0)
+
+        stats = await db.get_stats()
+        tool_stat = stats["stats"][0]
+
+        # Zero is a valid duration for very fast calls
+        assert tool_stat["total_duration_ms"] == 0
+        # 0 is stored as min/max since it's a valid measurement
+        assert tool_stat["min_duration_ms"] == 0
+        assert tool_stat["max_duration_ms"] == 0
+
+
+class TestSchemaMigration:
+    """Tests for schema migration from v1 to v3."""
+
+    @pytest.mark.asyncio
+    async def test_migration_v1_to_v3(self):
+        """Test that v1 databases are migrated to v3 with all columns."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             db_path = str(Path(tmp_dir) / "test.sqlite")
 
@@ -450,15 +564,80 @@ class TestSchemaMigration:
             stats = await db.get_stats()
             tool_stat = next(s for s in stats["stats"] if s["name"] == "old_tool")
 
+            # Check v2 columns migrated
             assert tool_stat["call_count"] == 5
             assert tool_stat["total_input_tokens"] == 0
             assert tool_stat["total_output_tokens"] == 0
             assert tool_stat["estimated_tokens"] == 0
 
-            await db.record("old_tool", "tool", input_tokens=100)
+            # Check v3 columns migrated
+            assert tool_stat["total_duration_ms"] == 0
+            assert tool_stat["min_duration_ms"] is None
+            assert tool_stat["max_duration_ms"] is None
+            assert tool_stat["avg_latency_ms"] == 0
+
+            # Test that new data can be recorded with all fields
+            await db.record("old_tool", "tool", input_tokens=100, duration_ms=50)
             stats2 = await db.get_stats()
             tool_stat2 = next(s for s in stats2["stats"] if s["name"] == "old_tool")
             assert tool_stat2["total_input_tokens"] == 100
+            assert tool_stat2["total_duration_ms"] == 50
+
+    @pytest.mark.asyncio
+    async def test_migration_v2_to_v3(self):
+        """Test that v2 databases are migrated to v3 with latency columns."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = str(Path(tmp_dir) / "test.sqlite")
+
+            conn = sqlite3.connect(db_path)
+            conn.executescript("""
+                CREATE TABLE mcpstat_usage (
+                    name TEXT PRIMARY KEY,
+                    type TEXT NOT NULL DEFAULT 'tool',
+                    call_count INTEGER NOT NULL DEFAULT 0,
+                    last_accessed TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    total_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_output_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_response_chars INTEGER NOT NULL DEFAULT 0,
+                    estimated_tokens INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE mcpstat_metadata (
+                    name TEXT PRIMARY KEY,
+                    tags TEXT DEFAULT '',
+                    short_description TEXT,
+                    full_description TEXT,
+                    schema_version INTEGER NOT NULL DEFAULT 2,
+                    updated_at TEXT NOT NULL
+                );
+
+                INSERT INTO mcpstat_usage (name, type, call_count, last_accessed, created_at, total_input_tokens)
+                VALUES ('v2_tool', 'tool', 10, '2024-01-15', '2024-01-01', 500);
+            """)
+            conn.close()
+
+            db = MCPStatDatabase(db_path)
+
+            stats = await db.get_stats()
+            tool_stat = next(s for s in stats["stats"] if s["name"] == "v2_tool")
+
+            # Existing v2 data preserved
+            assert tool_stat["call_count"] == 10
+            assert tool_stat["total_input_tokens"] == 500
+
+            # v3 columns added with defaults
+            assert tool_stat["total_duration_ms"] == 0
+            assert tool_stat["min_duration_ms"] is None
+            assert tool_stat["max_duration_ms"] is None
+
+            # Test recording latency on existing tool
+            await db.record("v2_tool", "tool", duration_ms=75)
+            stats2 = await db.get_stats()
+            tool_stat2 = next(s for s in stats2["stats"] if s["name"] == "v2_tool")
+            assert tool_stat2["total_duration_ms"] == 75
+            assert tool_stat2["min_duration_ms"] == 75
+            assert tool_stat2["max_duration_ms"] == 75
 
 
 # ============================================================================
@@ -503,6 +682,31 @@ class TestMCPStat:
         assert stats["stats"][0]["total_output_tokens"] == 100
 
     @pytest.mark.asyncio
+    async def test_record_with_latency_tracking(self, stat_fixture):
+        """Test record with latency tracking in MCPStat."""
+        stat = stat_fixture
+        await stat.record("tool1", "tool", duration_ms=150)
+        stats = await stat.get_stats()
+        assert stats["stats"][0]["total_duration_ms"] == 150
+        assert stats["stats"][0]["min_duration_ms"] == 150
+        assert stats["stats"][0]["max_duration_ms"] == 150
+        assert stats["stats"][0]["avg_latency_ms"] == 150
+
+    @pytest.mark.asyncio
+    async def test_record_with_all_tracking(self, stat_fixture):
+        """Test record with token and latency tracking combined."""
+        stat = stat_fixture
+        await stat.record(
+            "tool1", "tool", response_chars=500, input_tokens=50, output_tokens=100, duration_ms=200
+        )
+        stats = await stat.get_stats()
+        tool_stat = stats["stats"][0]
+        assert tool_stat["total_input_tokens"] == 50
+        assert tool_stat["total_output_tokens"] == 100
+        assert tool_stat["total_duration_ms"] == 200
+        assert stats["latency_summary"]["has_latency_data"]
+
+    @pytest.mark.asyncio
     async def test_report_tokens(self, stat_fixture):
         """Test report_tokens method in MCPStat."""
         stat = stat_fixture
@@ -510,6 +714,104 @@ class TestMCPStat:
         await stat.report_tokens("tool1", 100, 200)
         stats = await stat.get_stats()
         assert stats["stats"][0]["total_input_tokens"] == 100
+
+    @pytest.mark.asyncio
+    async def test_track_decorator(self, stat_fixture):
+        """Test @stat.track decorator for automatic latency tracking."""
+        stat = stat_fixture
+
+        @stat.track
+        async def my_tool(_name: str, _arguments: dict):
+            import asyncio
+
+            await asyncio.sleep(0.01)  # 10ms
+            return {"result": "success"}
+
+        result = await my_tool("test_tool", {})
+        assert result == {"result": "success"}
+
+        stats = await stat.get_stats()
+        assert stats["total_calls"] == 1
+        tool_stat = stats["stats"][0]
+        assert tool_stat["name"] == "test_tool"
+        assert tool_stat["total_duration_ms"] >= 10  # At least 10ms
+
+    @pytest.mark.asyncio
+    async def test_track_decorator_with_parentheses(self, stat_fixture):
+        """Test @stat.track() decorator with explicit type."""
+        stat = stat_fixture
+
+        @stat.track(primitive_type="prompt")
+        async def my_prompt(_name: str, _arguments: dict):
+            return "prompt result"
+
+        await my_prompt("test_prompt", {})
+
+        stats = await stat.get_stats()
+        assert stats["total_calls"] == 1
+        assert stats["stats"][0]["type"] == "prompt"
+
+    @pytest.mark.asyncio
+    async def test_track_decorator_with_exception(self, stat_fixture):
+        """Test that @stat.track records calls even when exceptions occur."""
+        stat = stat_fixture
+
+        @stat.track
+        async def failing_tool(_name: str, _arguments: dict):
+            raise ValueError("Intentional error")
+
+        with pytest.raises(ValueError, match="Intentional error"):
+            await failing_tool("failing_tool", {})
+
+        # Call should still be recorded
+        stats = await stat.get_stats()
+        assert stats["total_calls"] == 1
+        assert stats["stats"][0]["name"] == "failing_tool"
+
+    @pytest.mark.asyncio
+    async def test_track_decorator_fallback_name(self, stat_fixture):
+        """Test @stat.track uses function name when no name arg provided."""
+        stat = stat_fixture
+
+        @stat.track
+        async def my_custom_function():
+            return "done"
+
+        await my_custom_function()
+
+        stats = await stat.get_stats()
+        assert stats["total_calls"] == 1
+        assert stats["stats"][0]["name"] == "my_custom_function"
+
+    @pytest.mark.asyncio
+    async def test_tracking_context_manager(self, stat_fixture):
+        """Test async with stat.tracking() context manager."""
+        stat = stat_fixture
+
+        async with stat.tracking("ctx_tool", "tool"):
+            import asyncio
+
+            await asyncio.sleep(0.01)  # 10ms
+
+        stats = await stat.get_stats()
+        assert stats["total_calls"] == 1
+        tool_stat = stats["stats"][0]
+        assert tool_stat["name"] == "ctx_tool"
+        assert tool_stat["total_duration_ms"] >= 10
+
+    @pytest.mark.asyncio
+    async def test_tracking_context_manager_with_exception(self, stat_fixture):
+        """Test tracking context manager records calls even on exception."""
+        stat = stat_fixture
+
+        with pytest.raises(RuntimeError, match="Context error"):
+            async with stat.tracking("ctx_failing", "tool"):
+                raise RuntimeError("Context error")
+
+        # Call should still be recorded
+        stats = await stat.get_stats()
+        assert stats["total_calls"] == 1
+        assert stats["stats"][0]["name"] == "ctx_failing"
 
     @pytest.mark.asyncio
     async def test_sync_prompts(self, stat_fixture):
@@ -898,3 +1200,223 @@ class TestBuiltinToolsHandler:
         handler = BuiltinToolsHandler(stat_fixture, prefix="stats")
         assert handler.is_stats_tool("stats_tool_usage_stats")
         assert not handler.is_stats_tool("get_tool_usage_stats")
+
+
+# ============================================================================
+# Coverage Gap Tests
+# ============================================================================
+
+
+class TestCoverageGaps:
+    """Tests targeting uncovered branches for 100% coverage."""
+
+    @pytest.mark.asyncio
+    async def test_record_db_failure_prints_to_stderr(self, stat_fixture, capsys):
+        """Test that record() prints to stderr when db.record() raises."""
+        stat = stat_fixture
+
+        # Sabotage the database to trigger an exception
+        stat._db.db_path = "/nonexistent/path/impossible.sqlite"
+        stat._db._initialized = False
+
+        await stat.record("tool1", "tool")
+
+        captured = capsys.readouterr()
+        assert "[mcpstat] SQLite tracking failed" in captured.err
+
+    @pytest.mark.asyncio
+    async def test_report_tokens_db_failure_prints_to_stderr(self, stat_fixture, capsys):
+        """Test that report_tokens() prints to stderr when db fails."""
+        stat = stat_fixture
+
+        # Sabotage the database
+        stat._db.db_path = "/nonexistent/path/impossible.sqlite"
+        stat._db._initialized = False
+
+        await stat.report_tokens("tool1", 100, 200)
+
+        captured = capsys.readouterr()
+        assert "[mcpstat] Token reporting failed" in captured.err
+
+    @pytest.mark.asyncio
+    async def test_track_decorator_non_string_first_arg(self, stat_fixture):
+        """Test @stat.track falls back to fn.__name__ when first arg isn't a string."""
+        stat = stat_fixture
+
+        @stat.track
+        async def my_handler(data: dict):
+            return data
+
+        result = await my_handler({"key": "value"})
+        assert result == {"key": "value"}
+
+        stats = await stat.get_stats()
+        assert stats["total_calls"] == 1
+        # Should use function name since first arg is a dict, not a string
+        assert stats["stats"][0]["name"] == "my_handler"
+
+    @pytest.mark.asyncio
+    async def test_track_decorator_suppresses_record_failure(self, stat_fixture):
+        """Test that @stat.track suppresses exceptions from self.record()."""
+        stat = stat_fixture
+
+        @stat.track
+        async def my_tool(_name: str, _args: dict):
+            return "ok"
+
+        # First call succeeds to verify normal operation
+        result = await my_tool("test_tool", {})
+        assert result == "ok"
+
+        # Now sabotage the db so record() fails inside the decorator
+        stat._db.db_path = "/nonexistent/path/impossible.sqlite"
+        stat._db._initialized = False
+
+        # Should NOT raise - exception is suppressed
+        result = await my_tool("test_tool2", {})
+        assert result == "ok"
+
+    @pytest.mark.asyncio
+    async def test_tracking_context_manager_suppresses_record_failure(self, stat_fixture):
+        """Test that tracking() context manager suppresses exceptions from self.record()."""
+        stat = stat_fixture
+
+        # Sabotage the db so record() fails
+        stat._db.db_path = "/nonexistent/path/impossible.sqlite"
+        stat._db._initialized = False
+
+        # Should NOT raise - exception is suppressed
+        async with stat.tracking("ctx_tool", "tool"):
+            result = "completed"
+
+        assert result == "completed"
+
+    @pytest.mark.asyncio
+    async def test_avg_tokens_estimated_only(self, db_fixture):
+        """Test avg_tokens_per_call uses estimated tokens when no actual tokens."""
+        db = db_fixture
+        # Record with response_chars only (no actual tokens)
+        await db.record("tool1", "tool", response_chars=700)
+        await db.record("tool1", "tool", response_chars=700)
+
+        stats = await db.get_stats()
+        tool_stat = stats["stats"][0]
+
+        # Should use estimated_tokens / call_count
+        assert tool_stat["total_input_tokens"] == 0
+        assert tool_stat["total_output_tokens"] == 0
+        assert tool_stat["estimated_tokens"] > 0
+        assert tool_stat["avg_tokens_per_call"] == tool_stat["estimated_tokens"] // 2
+
+    @pytest.mark.asyncio
+    async def test_sync_metadata_updates_changed_entries(self, db_fixture):
+        """Test that sync_metadata updates entries when metadata changes."""
+        db = db_fixture
+        tools_v1 = [
+            {"name": "tool1", "description": "Original", "tags": ["a"], "short_description": "V1"},
+        ]
+        await db.sync_metadata(tools_v1, cleanup_orphans=False)
+
+        # Sync again with changed metadata
+        tools_v2 = [
+            {
+                "name": "tool1",
+                "description": "Updated",
+                "tags": ["a", "b"],
+                "short_description": "V2",
+            },
+        ]
+        await db.sync_metadata(tools_v2, cleanup_orphans=False)
+
+        catalog = await db.get_catalog()
+        assert catalog["total_tracked"] == 1
+        result = catalog["results"][0]
+        assert result["short_description"] == "V2"
+        assert "b" in result["tags"]
+
+    @pytest.mark.asyncio
+    async def test_generate_stats_prompt_all_used(self):
+        """Test prompt generation when all tools have been used (no unused section)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            stat = MCPStat("test", db_path=str(Path(tmp_dir) / "test.sqlite"))
+
+            # Create tools and use them all so format_unused returns "(All have been used)"
+            class MockTool:
+                def __init__(self, name):
+                    self.name = name
+                    self.description = f"Tool {name}"
+
+            await stat.sync_tools([MockTool("t1"), MockTool("t2")])
+            await stat.record("t1", "tool")
+            await stat.record("t2", "tool")
+
+            text = await generate_stats_prompt(stat)
+            assert "(All have been used)" in text
+            stat.close()
+
+    def test_logger_reinit_no_duplicate_handlers(self):
+        """Test that re-initializing logger with same name doesn't duplicate handlers."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            log_file = str(Path(tmp_dir) / "test.log")
+            logger_name = "mcpstat.test_reinit"
+
+            logger1 = MCPStatLogger(log_file, logger_name=logger_name)
+            handler_count_1 = len(logger1._logger.handlers) if logger1._logger else 0
+
+            # Re-initialize with same logger name - should not add another handler
+            logger2 = MCPStatLogger(log_file, logger_name=logger_name)
+            handler_count_2 = len(logger2._logger.handlers) if logger2._logger else 0
+
+            assert handler_count_1 == handler_count_2 == 1
+
+            logger1.close()
+            logger2.close()
+
+    @pytest.mark.asyncio
+    async def test_get_stats_with_zero_count_row(self):
+        """Test get_stats when mcpstat_usage has a row with call_count=0."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = str(Path(tmp_dir) / "test.sqlite")
+            db = MCPStatDatabase(db_path)
+
+            # Initialize schema
+            await db.record("tool1", "tool")
+
+            # Insert a zero-count row directly (simulates edge case)
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT INTO mcpstat_usage (name, type, call_count, last_accessed, created_at) "
+                "VALUES ('zero_tool', 'tool', 0, '2026-01-01T00:00:00', '2026-01-01T00:00:00')"
+            )
+            conn.commit()
+            conn.close()
+
+            stats = await db.get_stats()
+            assert stats["zero_count"] == 1
+
+            zero_stat = next(s for s in stats["stats"] if s["name"] == "zero_tool")
+            assert zero_stat["call_count"] == 0
+            assert zero_stat["avg_tokens_per_call"] == 0
+
+    @pytest.mark.asyncio
+    async def test_prompt_format_unused_with_items(self):
+        """Test generate_stats_prompt when some tools are unused (format_unused branch)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = str(Path(tmp_dir) / "test.sqlite")
+            stat = MCPStat("test", db_path=db_path)
+
+            # Record one tool to create a usage row
+            await stat.record("used_tool", "tool")
+
+            # Insert a zero-count row to simulate an unused tool in get_by_type
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT INTO mcpstat_usage (name, type, call_count, last_accessed, created_at) "
+                "VALUES ('unused_tool', 'tool', 0, '2026-01-01T00:00:00', '2026-01-01T00:00:00')"
+            )
+            conn.commit()
+            conn.close()
+
+            text = await generate_stats_prompt(stat)
+            assert "- `unused_tool`" in text
+            stat.close()

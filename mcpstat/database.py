@@ -30,7 +30,9 @@ if TYPE_CHECKING:
 # v1: Initial schema
 # v2: Added token tracking columns (total_input_tokens, total_output_tokens,
 #     total_response_chars, estimated_tokens)
-SCHEMA_VERSION = 2
+# v3: Added latency tracking columns (total_duration_ms, min_duration_ms,
+#     max_duration_ms)
+SCHEMA_VERSION = 3
 
 # Token estimation: ~3.5 characters per token (conservative for mixed content)
 CHARS_PER_TOKEN = 3.5
@@ -111,6 +113,26 @@ class MCPStatDatabase:
             if col_name not in existing_cols:
                 conn.execute(f"ALTER TABLE mcpstat_usage ADD COLUMN {col_name} {col_def}")
 
+    def _migrate_to_v3(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema to v3: Add latency tracking columns.
+
+        Safe to run multiple times - checks for existing columns.
+        """
+        # Get existing columns in mcpstat_usage
+        cursor = conn.execute("PRAGMA table_info(mcpstat_usage)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+
+        # Columns to add for latency tracking
+        new_columns = [
+            ("total_duration_ms", "INTEGER NOT NULL DEFAULT 0"),
+            ("min_duration_ms", "INTEGER"),  # NULL means no data yet
+            ("max_duration_ms", "INTEGER"),  # NULL means no data yet
+        ]
+
+        for col_name, col_def in new_columns:
+            if col_name not in existing_cols:
+                conn.execute(f"ALTER TABLE mcpstat_usage ADD COLUMN {col_name} {col_def}")
+
     def _ensure_schema(self) -> None:
         """Create database schema if not exists.
 
@@ -141,7 +163,10 @@ class MCPStatDatabase:
                     total_input_tokens INTEGER NOT NULL DEFAULT 0,
                     total_output_tokens INTEGER NOT NULL DEFAULT 0,
                     total_response_chars INTEGER NOT NULL DEFAULT 0,
-                    estimated_tokens INTEGER NOT NULL DEFAULT 0
+                    estimated_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_duration_ms INTEGER NOT NULL DEFAULT 0,
+                    min_duration_ms INTEGER,
+                    max_duration_ms INTEGER
                 )
             """)
 
@@ -169,6 +194,7 @@ class MCPStatDatabase:
 
             # Run migrations for existing databases
             self._migrate_to_v2(conn)
+            self._migrate_to_v3(conn)
 
             conn.commit()
 
@@ -182,8 +208,9 @@ class MCPStatDatabase:
         response_chars: int | None = None,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
+        duration_ms: int | None = None,
     ) -> None:
-        """Record a primitive invocation with optional token tracking.
+        """Record a primitive invocation with optional token and latency tracking.
 
         Uses INSERT ... ON CONFLICT for atomic upsert.
 
@@ -193,6 +220,7 @@ class MCPStatDatabase:
             response_chars: Size of response in characters (for token estimation)
             input_tokens: Actual input token count (from LLM provider)
             output_tokens: Actual output token count (from LLM provider)
+            duration_ms: Execution duration in milliseconds
         """
         self._ensure_schema()
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -202,6 +230,10 @@ class MCPStatDatabase:
         if response_chars is not None and response_chars > 0:
             est_tokens = max(1, int(response_chars / CHARS_PER_TOKEN))
 
+        # Prepare duration values
+        dur_ms = duration_ms if duration_ms is not None and duration_ms >= 0 else None
+        dur_total = dur_ms if dur_ms is not None else 0
+
         async with self._get_lock():
             with self._connect() as conn:
                 conn.execute(
@@ -209,9 +241,10 @@ class MCPStatDatabase:
                     INSERT INTO mcpstat_usage (
                         name, type, call_count, last_accessed, created_at,
                         total_input_tokens, total_output_tokens,
-                        total_response_chars, estimated_tokens
+                        total_response_chars, estimated_tokens,
+                        total_duration_ms, min_duration_ms, max_duration_ms
                     )
-                    VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(name) DO UPDATE SET
                         call_count = call_count + 1,
                         last_accessed = excluded.last_accessed,
@@ -219,7 +252,18 @@ class MCPStatDatabase:
                         total_input_tokens = total_input_tokens + excluded.total_input_tokens,
                         total_output_tokens = total_output_tokens + excluded.total_output_tokens,
                         total_response_chars = total_response_chars + excluded.total_response_chars,
-                        estimated_tokens = estimated_tokens + excluded.estimated_tokens
+                        estimated_tokens = estimated_tokens + excluded.estimated_tokens,
+                        total_duration_ms = total_duration_ms + COALESCE(excluded.total_duration_ms, 0),
+                        min_duration_ms = CASE
+                            WHEN excluded.min_duration_ms IS NULL THEN min_duration_ms
+                            WHEN min_duration_ms IS NULL THEN excluded.min_duration_ms
+                            ELSE MIN(min_duration_ms, excluded.min_duration_ms)
+                        END,
+                        max_duration_ms = CASE
+                            WHEN excluded.max_duration_ms IS NULL THEN max_duration_ms
+                            WHEN max_duration_ms IS NULL THEN excluded.max_duration_ms
+                            ELSE MAX(max_duration_ms, excluded.max_duration_ms)
+                        END
                     """,
                     (
                         name,
@@ -230,6 +274,9 @@ class MCPStatDatabase:
                         output_tokens or 0,
                         response_chars or 0,
                         est_tokens,
+                        dur_total,
+                        dur_ms,
+                        dur_ms,
                     ),
                 )
                 conn.commit()
@@ -304,6 +351,7 @@ class MCPStatDatabase:
                     SELECT u.name, u.type, u.call_count, u.last_accessed,
                            u.total_input_tokens, u.total_output_tokens,
                            u.total_response_chars, u.estimated_tokens,
+                           u.total_duration_ms, u.min_duration_ms, u.max_duration_ms,
                            m.tags, m.short_description, m.full_description
                     FROM mcpstat_usage u
                     LEFT JOIN mcpstat_metadata m ON u.name = m.name
@@ -324,6 +372,7 @@ class MCPStatDatabase:
         total_input_tokens = 0
         total_output_tokens = 0
         total_estimated_tokens = 0
+        total_duration_ms = 0
 
         for row in rows:
             count = row["call_count"] or 0
@@ -334,10 +383,14 @@ class MCPStatDatabase:
             input_tokens = row["total_input_tokens"] or 0
             output_tokens = row["total_output_tokens"] or 0
             estimated = row["estimated_tokens"] or 0
+            duration_ms = row["total_duration_ms"] or 0
+            min_dur = row["min_duration_ms"]
+            max_dur = row["max_duration_ms"]
 
             total_input_tokens += input_tokens
             total_output_tokens += output_tokens
             total_estimated_tokens += estimated
+            total_duration_ms += duration_ms
 
             # Calculate average tokens per call
             avg_tokens = 0
@@ -347,6 +400,11 @@ class MCPStatDatabase:
                     avg_tokens = actual_total // count
                 elif estimated > 0:
                     avg_tokens = estimated // count
+
+            # Calculate average latency per call
+            avg_latency_ms = 0
+            if count > 0 and duration_ms > 0:
+                avg_latency_ms = duration_ms // count
 
             stats.append(
                 {
@@ -362,6 +420,10 @@ class MCPStatDatabase:
                     "total_response_chars": row["total_response_chars"] or 0,
                     "estimated_tokens": estimated,
                     "avg_tokens_per_call": avg_tokens,
+                    "total_duration_ms": duration_ms,
+                    "min_duration_ms": min_dur,
+                    "max_duration_ms": max_dur,
+                    "avg_latency_ms": avg_latency_ms,
                 }
             )
 
@@ -377,6 +439,10 @@ class MCPStatDatabase:
                 "total_output_tokens": total_output_tokens,
                 "total_estimated_tokens": total_estimated_tokens,
                 "has_actual_tokens": total_input_tokens > 0 or total_output_tokens > 0,
+            },
+            "latency_summary": {
+                "total_duration_ms": total_duration_ms,
+                "has_latency_data": total_duration_ms > 0,
             },
             "stats": stats,
         }

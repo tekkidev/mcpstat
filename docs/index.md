@@ -6,7 +6,7 @@
 
 **mcpstat** adds usage tracking and analytics to your [MCP (Model Context Protocol)](https://modelcontextprotocol.io) servers. Pure Python stdlib, no required dependencies.
 
-Track which tools get called, how often, and keep an audit trail - all in about three lines of code. Then ask your AI assistant: *"Give me MCP usage stats."*
+Track which tools get called, how often, and keep an audit trail - all in 3 lines of code. Then ask your AI assistant: *"Give me MCP usage stats."*
 
 ---
 
@@ -32,6 +32,7 @@ Without tracking, agents may pull irrelevant resources into context - leading to
 - **Built-in tools & prompts** - Expose stats directly to LLM clients
 - **Metadata enrichment** - Tag and describe tools for discoverability
 - **Token tracking** - Estimate or record actual token usage
+- **Latency tracking** - Measure execution time, identify slow tools
 - **Async-first** - Thread-safe via `asyncio.Lock`
 
 ---
@@ -57,15 +58,15 @@ from mcp.server import Server
 from mcpstat import MCPStat
 
 app = Server("my-server")
-stat = MCPStat("my-server")  # Initialize
+stat = MCPStat("my-server")
 
 @app.call_tool()
+@stat.track  # ← One decorator does everything!
 async def handle_tool(name: str, arguments: dict):
-    await stat.record(name, "tool")  # Track as FIRST line
-    # ... your tool logic
+    return await my_logic(arguments)  # Latency tracked automatically
 ```
 
-One line - `await stat.record(name, "tool")` - and you're tracking.
+One decorator - `@stat.track` - and you get full tracking with automatic latency measurement.
 
 ---
 
@@ -92,12 +93,49 @@ The AI invokes `get_tool_usage_stats` or `get_tool_catalog` as needed.
 
 ## Documentation
 
-| Guide | Description |
-|-------|-------------|
-| [Quick Start](quickstart.md) | Install mcpstat and add tracking to your first MCP server in minutes. |
-| [Configuration](configuration.md) | Configure paths, logging, metadata presets, and environment variables. |
-| [API Reference](api.md) | Complete reference for `MCPStat`, built-in tools, and handlers. |
-| [Token Tracking](token-tracking.md) | Track response sizes and estimate token usage for cost analysis. |
+<div class="grid cards" markdown>
+
+-   :material-rocket-launch:{ .lg .middle } **Getting Started**
+
+    ---
+
+    Install mcpstat and add tracking to your first MCP server in minutes.
+
+    [:octicons-arrow-right-24: Quick Start](quickstart.md)
+
+-   :material-cog:{ .lg .middle } **Configuration**
+
+    ---
+
+    Configure paths, logging, metadata presets, and environment variables.
+
+    [:octicons-arrow-right-24: Configuration](configuration.md)
+
+-   :material-api:{ .lg .middle } **Core API**
+
+    ---
+
+    Complete reference for `MCPStat`, built-in tools, and handlers.
+
+    [:octicons-arrow-right-24: API Reference](api.md)
+
+-   :material-chart-line:{ .lg .middle } **Token Tracking**
+
+    ---
+
+    Track response sizes and estimate token usage for cost analysis.
+
+    [:octicons-arrow-right-24: Token Tracking](token-tracking.md)
+
+-   :material-timer-outline:{ .lg .middle } **Latency Tracking**
+
+    ---
+
+    Measure tool execution time to identify slow tools and monitor performance.
+
+    [:octicons-arrow-right-24: Latency Tracking](latency-tracking.md)
+
+</div>
 
 ---
 

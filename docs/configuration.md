@@ -33,7 +33,8 @@ stat = MCPStat(
 | `db_path` | `str` | `./mcp_stat_data.sqlite` | Path to SQLite database |
 | `log_path` | `str` | `./mcp_stat.log` | Path to file log |
 | `log_enabled` | `bool` | `False` | Enable timestamped file logging |
-| `metadata_presets` | `dict` | `{}` | Pre-defined metadata for tools |
+| `metadata_presets` | `dict` | `None` | Pre-defined metadata for tools |
+| `cleanup_orphans` | `bool` | `True` | Remove metadata for unregistered tools on sync |
 
 ---
 
@@ -81,7 +82,6 @@ stat = MCPStat(
 |-------|------|-------------|
 | `tags` | `list[str]` | Categories for filtering |
 | `short` | `str` | Brief description (one line) |
-| `full` | `str` | Extended description (optional) |
 
 ---
 
@@ -101,7 +101,7 @@ Auto-extraction rules:
 - Normalized to lowercase
 - Stopwords filtered (`the`, `to`, `from`, `and`, etc.)
 
-Example: `fetch_weather_data` → `["fetch", "weather", "data"]`
+Example: `fetch_weather_data` → `["fetch_weather_data", "fetch", "weather", "data"]`
 
 ---
 
@@ -149,9 +149,14 @@ mcpstat uses SQLite with two tables:
 | `type` | TEXT | `tool`, `prompt`, or `resource` |
 | `call_count` | INTEGER | Total invocations |
 | `last_accessed` | TEXT | ISO 8601 timestamp |
+| `created_at` | TEXT | ISO 8601 creation timestamp |
 | `total_input_tokens` | INTEGER | Cumulative input tokens |
 | `total_output_tokens` | INTEGER | Cumulative output tokens |
+| `total_response_chars` | INTEGER | Cumulative response characters |
 | `estimated_tokens` | INTEGER | Estimated from response size |
+| `total_duration_ms` | INTEGER | Cumulative execution time |
+| `min_duration_ms` | INTEGER | Minimum recorded duration (nullable) |
+| `max_duration_ms` | INTEGER | Maximum recorded duration (nullable) |
 
 ### `mcpstat_metadata`
 
@@ -161,6 +166,8 @@ mcpstat uses SQLite with two tables:
 | `tags` | TEXT | Comma-separated tags |
 | `short_description` | TEXT | Brief description |
 | `full_description` | TEXT | Extended description |
+| `schema_version` | INTEGER | Schema version number |
+| `updated_at` | TEXT | ISO 8601 last update timestamp |
 
 ---
 
@@ -185,12 +192,22 @@ async def handle_tool(name, args):
     await stat.record(name, "tool")
 ```
 
-### 2. Record First
+### 2. Use @stat.track Decorator (Recommended)
 
-Always place `stat.record()` as the FIRST line:
+The `@stat.track` decorator is the simplest and most reliable tracking method:
 
 ```python
-# ✅ Correct - always tracked
+# ✅ Recommended - automatic latency tracking, never misses a call
+@app.call_tool()
+@stat.track
+async def handle_tool(name: str, arguments: dict):
+    return await my_logic(arguments)
+```
+
+For manual tracking with `record()`, place it as the FIRST line:
+
+```python
+# ✅ Correct for manual tracking
 async def handle_tool(name, args):
     await stat.record(name, "tool")
     result = do_something(args)

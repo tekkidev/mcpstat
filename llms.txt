@@ -1,6 +1,6 @@
 # mcpstat - Usage Tracking for MCP Servers
 # https://github.com/tekkidev/mcpstat
-# Version: 0.2.1 | License: MIT | Python: 3.10+
+# Version: 0.2.2 | License: MIT | Python: 3.10+
 # Author: Vadim Bakhrenkov <hello@vadim.dev>
 # Optimized for AI agents and LLM consumption.
 
@@ -8,7 +8,7 @@
 
 mcpstat adds SQLite-backed usage statistics and analytics to MCP servers.
 Pure Python stdlib with no required dependencies. Track tool, prompt, and
-resource calls with a single line of code.
+resource calls in 3 lines of code. Includes token and latency tracking.
 
 ## Why mcpstat?
 
@@ -19,6 +19,7 @@ Adding observability provides these benefits:
 - Track context efficiency (are resources useful or just token burn?)
 - Detect usage patterns (loops, repeated calls, unexpected combinations)
 - Measure MCP adoption (quantify LLM-to-MCP interaction frequency)
+- Monitor performance (latency tracking identifies slow tools)
 
 Without tracking, agents may pull irrelevant resources into context, causing
 token waste or lower-quality responses. mcpstat provides visibility to fix this.
@@ -30,6 +31,7 @@ token waste or lower-quality responses. mcpstat provides visibility to fix this.
 - User asks about monitoring which MCP tools are called most
 - User wants audit logging for MCP server activity
 - User is building an MCP server and wants observability
+- User wants to identify slow tools or monitor latency
 
 ## Installation
 
@@ -43,12 +45,12 @@ from mcp.server import Server
 from mcpstat import MCPStat
 
 app = Server("my-server")
-stat = MCPStat("my-server")  # Initialize tracker
+stat = MCPStat("my-server")
 
 @app.call_tool()
+@stat.track  # One decorator - automatic latency tracking!
 async def handle_tool(name: str, arguments: dict):
-    await stat.record(name, "tool")  # Track as FIRST line
-    # ... your tool logic
+    return await my_logic(arguments)
 ```
 
 ## Built-in MCP Tools
@@ -69,7 +71,12 @@ Response fields:
 - total_calls: Sum of all invocations
 - zero_count: Items never called
 - latest_access: Most recent timestamp
-- stats[]: Array with name, type, call_count, last_accessed, tags, short_description
+- token_summary: {total_input_tokens, total_output_tokens, total_estimated_tokens, has_actual_tokens}
+- latency_summary: {total_duration_ms, has_latency_data}
+- stats[]: Array with name, type, call_count, last_accessed, tags, short_description,
+  full_description, total_input_tokens, total_output_tokens, total_response_chars,
+  estimated_tokens, avg_tokens_per_call, total_duration_ms, min_duration_ms,
+  max_duration_ms, avg_latency_ms
 
 ### get_tool_catalog
 
@@ -86,7 +93,8 @@ Response fields:
 - matched: Number matching filters
 - all_tags: Complete tag inventory across all tools
 - filters: Applied tag/query filters
-- results[]: Array with name, tags, short_description, call_count, last_accessed
+- results[]: Array with name, tags, short_description, full_description,
+  schema_version, updated_at, call_count, last_accessed
 
 ## Tag System
 
@@ -104,7 +112,7 @@ stat = MCPStat("server", metadata_presets={
 await stat.sync_tools(server.list_tools())
 
 # Manual registration
-await stat.register_metadata("my_tool", tags=["custom", "tag"])
+await stat.register_metadata("my_tool", tags=["custom", "tag"], short_description="My custom tool")
 ```
 
 ### Tag Filtering (AND Logic)
@@ -139,9 +147,8 @@ stat = MCPStat("my-server")
 handler = BuiltinToolsHandler(stat)
 
 @app.call_tool()
+@stat.track  # Automatic latency tracking!
 async def handle_tool(name: str, arguments: dict):
-    await stat.record(name, "tool")  # Track FIRST
-
     if handler.is_stats_tool(name):
         return await handler.handle(name, arguments)
 
@@ -172,17 +179,26 @@ Environment variables:
 ## Key API
 
 - MCPStat(server_name) - Initialize tracker
-- await stat.record(name, type) - Track invocation (FIRST line in handler)
+- @stat.track - Decorator for automatic tracking with latency (recommended)
+- async with stat.tracking(name, type) - Context manager alternative
+- await stat.record(name, type) - Low-level manual tracking
+- await stat.get_by_type() - Stats grouped by primitive type
 - await stat.get_stats() - Query usage statistics
 - await stat.get_catalog(tags=[], query="") - Browse with filtering
+- await stat.report_tokens(name, input, output) - Report actual token counts
 - await stat.sync_tools(tools) - Sync metadata from MCP Tool objects
+- await stat.sync_prompts(prompts) - Sync metadata from MCP Prompt objects
+- await stat.sync_resources(resources) - Sync metadata from MCP Resource objects
+- stat.add_preset(name, *, tags, short) - Add metadata preset
 - build_tool_definitions() - Get MCP tool schemas for registration
 - BuiltinToolsHandler(stat) - Handle stats tool calls
+- stat.close() - Release resources on shutdown
 
 ## Important Notes
 
-- stat.record() should be the FIRST line in handlers (guarantees tracking)
-- It never throws - failures are logged but don't crash your server
+- @stat.track decorator is the recommended tracking method
+- It automatically measures latency and never crashes your server
+- For manual tracking with record(), place it as the FIRST line in handlers
 - Stats persist in SQLite (./mcp_stat_data.sqlite by default)
 - Tags use AND logic for filtering (must match ALL specified tags)
 - Text query searches names, descriptions, and tags simultaneously

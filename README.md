@@ -5,6 +5,8 @@
 [![PyPI - Python Version](https://img.shields.io/badge/python-3.10+-blue.svg)](https://pypi.org/project/mcpstat/)
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/tekkidev/mcpstat/tests.yaml)](https://github.com/tekkidev/mcpstat/actions/workflows/tests.yaml)
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/mcpstat)](https://pypistats.org/packages/mcpstat)
+[![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue)](http://mypy-lang.org/)
+[![Security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
 [![Codecov](https://codecov.io/gh/tekkidev/mcpstat/branch/main/graph/badge.svg)](https://codecov.io/gh/tekkidev/mcpstat)
 
 **Usage tracking and analytics for MCP servers.** Pure Python, zero required dependencies.
@@ -32,9 +34,10 @@ app = Server("my-server")
 stat = MCPStat("my-server")
 
 @app.call_tool()
+@stat.track  # ← One decorator does everything!
 async def handle_tool(name: str, arguments: dict):
-    await stat.record(name, "tool")  # ← Add as FIRST line
-    # ... your tool logic
+    # Your logic here - latency tracked automatically
+    return await my_logic(arguments)
 ```
 
 Then ask your AI assistant: *"Give me MCP usage stats"*
@@ -45,6 +48,7 @@ Then ask your AI assistant: *"Give me MCP usage stats"*
 - **Built-in MCP tools** - `get_tool_usage_stats`, `get_tool_catalog`
 - **Tag system** - Categorize and filter tools
 - **Token tracking** - Estimate or record actual token usage
+- **Latency tracking** - Measure execution duration, identify slow tools
 - **File logging** - Optional timestamped audit trail
 - **Async-first** - Thread-safe via `asyncio.Lock`
 
@@ -56,6 +60,7 @@ Then ask your AI assistant: *"Give me MCP usage stats"*
 - [Configuration](https://github.com/tekkidev/mcpstat/blob/main/docs/configuration.md) - Customize paths, logging, presets
 - [API Reference](https://github.com/tekkidev/mcpstat/blob/main/docs/api.md) - Complete method reference
 - [Token Tracking](https://github.com/tekkidev/mcpstat/blob/main/docs/token-tracking.md) - Cost analysis features
+- [Latency Tracking](https://github.com/tekkidev/mcpstat/blob/main/docs/latency-tracking.md) - Performance monitoring
 
 ## Examples
 

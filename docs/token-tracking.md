@@ -186,7 +186,8 @@ Token tracking adds these columns to `mcpstat_usage`:
 
 ## Migration
 
-> **Since v0.2.1**: Token tracking columns were added in version 0.2.1. Existing databases are automatically migrated to include these columns. All existing data is preserved, and new columns default to `0`.
+!!! info "Since v0.2.1"
+    Token tracking columns were added in version 0.2.1. Existing databases are automatically migrated to include these columns. All existing data is preserved, and new columns default to `0`.
 
 ---
 

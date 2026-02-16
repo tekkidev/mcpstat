@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-02-16
+
+### Added
+
+- **Latency Tracking**: Track execution duration for each tool call
+  - `@stat.track` decorator for automatic latency tracking (recommended)
+  - `async with stat.tracking(name, type)` context manager alternative
+  - `duration_ms` parameter in `record()` for manual timing
+  - New latency columns: `total_duration_ms`, `min_duration_ms`, `max_duration_ms`
+  - `latency_summary` in `get_stats()` response with total duration
+  - Per-tool `avg_latency_ms`, `min_duration_ms`, `max_duration_ms` metrics
+
+### Changed
+
+- Database schema bumped to v3 with latency tracking columns
+- `get_stats()` response now includes `latency_summary` object
+- Each stat item now includes latency fields
+- **API Improvement**: `@stat.track` decorator is now the recommended way to track calls
+  - Eliminates the "first line" requirement
+  - Automatic latency measurement
+  - Never fails user code
+
+### Migration
+
+- Automatic database migration from v2 to v3
+- Preserves all existing data
+- New latency columns default to 0/NULL for existing records
+
 ## [0.2.1] - 2026-02-01
 
 ### Added
@@ -73,7 +101,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full type annotations with strict mypy compliance (`py.typed` marker included)
 - Comprehensive test suite
 
-[Unreleased]: https://github.com/tekkidev/mcpstat/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/tekkidev/mcpstat/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/tekkidev/mcpstat/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/tekkidev/mcpstat/compare/v0.1.2...v0.2.1
 [0.1.2]: https://github.com/tekkidev/mcpstat/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/tekkidev/mcpstat/compare/v0.1.0...v0.1.1

@@ -20,20 +20,27 @@ pip install "mcpstat[mcp]"
 
 ## Minimal Integration
 
-Add usage tracking to any MCP server with three lines of code:
+Add usage tracking to any MCP server with one decorator:
 
 ```python
 from mcp.server import Server
 from mcpstat import MCPStat
 
 app = Server("my-server")
-stat = MCPStat("my-server")  # Initialize - creates SQLite database automatically
+stat = MCPStat("my-server")  # Creates SQLite database automatically
 
 @app.call_tool()
+@stat.track  # ← One decorator does everything!
 async def handle_tool(name: str, arguments: dict):
-    await stat.record(name, "tool")  # Track as FIRST line for 100% coverage
-    # ... your tool logic
+    return await my_logic(arguments)  # Latency tracked automatically
 ```
+
+That's it! The `@stat.track` decorator automatically:
+
+- Records every call
+- Measures execution time (latency)
+- Tracks success/failure
+- Never crashes your code (errors are suppressed)
 
 ---
 
@@ -66,16 +73,27 @@ handler = BuiltinToolsHandler(stat)
 # List your tools + mcpstat's built-in tools
 @app.list_tools()
 async def list_tools():
-    your_tools = [
-        {"name": "my_tool", "description": "...", "inputSchema": {...}},
-    ]
-    stats_tools = build_tool_definitions(server_name="my-server")
-    return your_tools + stats_tools
+    from mcp.types import Tool
 
-# Handle tool calls
+    your_tools = [
+        Tool(
+            name="my_tool",
+            description="Does something useful",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+    ]
+    stats_tools = [
+        Tool(name=t["name"], description=t["description"], inputSchema=t["inputSchema"])
+        for t in build_tool_definitions(server_name="my-server")
+    ]
+    all_tools = your_tools + stats_tools
+    await stat.sync_tools(all_tools)
+    return all_tools
+
+# Handle tool calls with automatic latency tracking
 @app.call_tool()
+@stat.track
 async def handle_tool(name: str, arguments: dict):
-    await stat.record(name, "tool")  # Always FIRST
 
     # Handle mcpstat's built-in tools
     if handler.is_stats_tool(name):
@@ -96,15 +114,19 @@ async def handle_tool(name: str, arguments: dict):
 mcpstat tracks any MCP primitive:
 
 ```python
+# Prompts - use @stat.track with explicit type
 @app.get_prompt()
-async def get_prompt(name: str, arguments: dict):
-    await stat.record(name, "prompt")  # Track prompts
+@stat.track(primitive_type="prompt")
+async def get_prompt(name: str, arguments: dict | None = None):
     # ... your prompt logic
 
+# Resources - use tracking() context manager
 @app.read_resource()
 async def read_resource(uri: str):
-    await stat.record(uri, "resource")  # Track resources
-    # ... your resource logic
+    uri_str = str(uri)  # MCP SDK may pass AnyUrl
+    resource_name = uri_str.split("/")[-1] if "/" in uri_str else uri_str
+    async with stat.tracking(resource_name, "resource"):
+        # ... your resource logic
 ```
 
 ---
@@ -145,6 +167,16 @@ catalog = await stat.get_catalog(query="temperature")
   "total_calls": 42,
   "zero_count": 2,
   "latest_access": "2026-02-01T10:30:45+00:00",
+  "token_summary": {
+    "total_input_tokens": 5000,
+    "total_output_tokens": 12000,
+    "total_estimated_tokens": 3500,
+    "has_actual_tokens": true
+  },
+  "latency_summary": {
+    "total_duration_ms": 15000,
+    "has_latency_data": true
+  },
   "stats": [
     {
       "name": "fetch_weather",
@@ -152,7 +184,16 @@ catalog = await stat.get_catalog(query="temperature")
       "call_count": 15,
       "last_accessed": "2026-02-01T10:30:45+00:00",
       "tags": ["api", "weather"],
-      "short_description": "Fetch weather data"
+      "short_description": "Fetch weather data",
+      "total_input_tokens": 1000,
+      "total_output_tokens": 2500,
+      "total_response_chars": 8000,
+      "estimated_tokens": 2286,
+      "avg_tokens_per_call": 233,
+      "total_duration_ms": 5000,
+      "min_duration_ms": 100,
+      "max_duration_ms": 1200,
+      "avg_latency_ms": 333
     }
   ]
 }
@@ -165,3 +206,4 @@ catalog = await stat.get_catalog(query="temperature")
 - [Configuration](configuration.md) - Customize paths, logging, and presets
 - [Core API](api.md) - Complete API reference
 - [Token Tracking](token-tracking.md) - Track token usage for cost analysis
+- [Latency Tracking](latency-tracking.md) - Monitor tool execution time

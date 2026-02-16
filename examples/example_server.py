@@ -9,7 +9,9 @@ SPDX-License-Identifier: MIT
 Extended MCP Server Example - Temperature Converter with Stats & Resources.
 
 Demonstrates:
-- Tool usage tracking with mcpstat
+- @stat.track decorator for automatic usage + latency tracking (tools)
+- @stat.track(primitive_type=...) for prompt tracking
+- stat.tracking() context manager for resource tracking
 - Built-in stats prompt for LLM consumption
 - Resource exposure (README.md)
 - Metadata presets for tool discovery
@@ -142,11 +144,9 @@ async def list_tools() -> list[Tool]:
 
 
 @app.call_tool()
+@stat.track  # ← Automatic usage + latency tracking!
 async def handle_tool(name: str, arguments: dict) -> list[TextContent]:
-    """Handle tool execution with usage tracking."""
-    # Record usage FIRST - guarantees 100% tracking
-    await stat.record(name, "tool")
-
+    """Handle tool execution with automatic usage tracking."""
     # Handle built-in stats tools
     if stats_handler.is_stats_tool(name):
         result = await stats_handler.handle(name, arguments)
@@ -185,7 +185,7 @@ async def handle_tool(name: str, arguments: dict) -> list[TextContent]:
 @app.list_resources()
 async def list_resources() -> list[Resource]:
     """List available resources."""
-    return [
+    resources = [
         Resource(
             uri="resource://example-server/readme",
             name="README.md",
@@ -199,44 +199,49 @@ async def list_resources() -> list[Resource]:
             mimeType="text/markdown",
         ),
     ]
+    await stat.sync_resources(resources)
+    return resources
 
 
 @app.read_resource()
 async def read_resource(uri: str) -> str:
-    """Read resource content with usage tracking."""
+    """Read resource content with usage tracking via context manager."""
     # Extract resource name for tracking
     # Convert AnyUrl to string if needed (MCP SDK may pass AnyUrl instead of str)
     uri_str = str(uri)
     resource_name = uri_str.split("/")[-1] if "/" in uri_str else uri_str
-    await stat.record(resource_name, "resource")
 
-    if uri_str == "resource://example-server/readme":
-        if README_PATH.exists():
-            return README_PATH.read_text(encoding="utf-8")
-        return "# README not found\n\nThe README.md file was not found at the expected location."
+    # Use tracking() context manager when you need to compute the name first
+    async with stat.tracking(resource_name, "resource"):
+        if uri_str == "resource://example-server/readme":
+            if README_PATH.exists():
+                return README_PATH.read_text(encoding="utf-8")
+            return (
+                "# README not found\n\nThe README.md file was not found at the expected location."
+            )
 
-    if uri_str == "resource://example-server/tool-catalog":
-        catalog = await stat.get_catalog(include_usage=True)
-        lines = [
-            "# Tool Catalog",
-            "",
-            f"**Total tools:** {catalog['total_tracked']}",
-            f"**Available tags:** {', '.join(catalog.get('all_tags', []))}",
-            "",
-            "## Tools",
-            "",
-        ]
-        for entry in catalog["results"]:
-            tags = ", ".join(entry.get("tags", [])) or "(no tags)"
-            calls = entry.get("call_count", 0)
-            lines.append(f"### `{entry['name']}`")
-            lines.append(entry.get("short_description", ""))
-            lines.append(f"- **Tags:** {tags}")
-            lines.append(f"- **Calls:** {calls}")
-            lines.append("")
-        return "\n".join(lines)
+        if uri_str == "resource://example-server/tool-catalog":
+            catalog = await stat.get_catalog(include_usage=True)
+            lines = [
+                "# Tool Catalog",
+                "",
+                f"**Total tools:** {catalog['total_tracked']}",
+                f"**Available tags:** {', '.join(catalog.get('all_tags', []))}",
+                "",
+                "## Tools",
+                "",
+            ]
+            for entry in catalog["results"]:
+                tags = ", ".join(entry.get("tags", [])) or "(no tags)"
+                calls = entry.get("call_count", 0)
+                lines.append(f"### `{entry['name']}`")
+                lines.append(entry.get("short_description", ""))
+                lines.append(f"- **Tags:** {tags}")
+                lines.append(f"- **Calls:** {calls}")
+                lines.append("")
+            return "\n".join(lines)
 
-    raise ValueError(f"Unknown resource: {uri_str}")
+        raise ValueError(f"Unknown resource: {uri_str}")
 
 
 # =============================================================================
@@ -247,7 +252,7 @@ async def read_resource(uri: str) -> str:
 @app.list_prompts()
 async def list_prompts() -> list[Prompt]:
     """List available prompts."""
-    return [
+    prompts = [
         Prompt(
             name="usage_stats",
             description="Generate MCP usage statistics summary for tools, resources, and prompts",
@@ -265,13 +270,14 @@ async def list_prompts() -> list[Prompt]:
             ],
         ),
     ]
+    await stat.sync_prompts(prompts)
+    return prompts
 
 
 @app.get_prompt()
+@stat.track(primitive_type="prompt")  # ← Decorator with explicit type
 async def get_prompt(name: str, arguments: dict | None = None) -> GetPromptResult:
-    """Get prompt with usage tracking."""
-    await stat.record(name, "prompt")
-
+    """Get prompt with automatic tracking."""
     args = arguments or {}
 
     if name == "usage_stats":

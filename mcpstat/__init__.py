@@ -15,17 +15,19 @@ from mcp.server import Server
 from mcpstat import MCPStat
 
 app = Server("my-server")
-stat = MCPStat("my-server")  # That's it!
+stat = MCPStat("my-server")
 
+# One decorator - automatic latency tracking!
 @app.call_tool()
+@stat.track
 async def handle_tool(name: str, arguments: dict):
-    await stat.record(name, "tool")
-    # ... your logic
+    return await my_logic(arguments)  # Latency tracked automatically
 ```
 
 ## Features
 
 - SQLite-backed usage tracking for tools, prompts, resources
+- **Automatic latency tracking** via `@stat.track` decorator
 - Optional file-based audit logging
 - Built-in stats query functions
 - Stats prompt generator for LLM consumption
@@ -57,7 +59,7 @@ Environment variables (optional override):
 
 from __future__ import annotations
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 __author__ = "Vadim Bakhrenkov"
 __license__ = "MIT"
 

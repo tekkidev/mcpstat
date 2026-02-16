@@ -9,8 +9,8 @@ SPDX-License-Identifier: MIT
 Minimal MCP Server with mcpstat - Temperature Converter.
 
 Shows:
-- 3 lines to add stats tracking to any MCP server
-- Simple, practical tools with usage recording
+- @stat.track decorator for automatic usage + latency tracking
+- Simple, practical tools with one-line integration
 
 Fun fact: -40°C = -40°F (the only temperature where both scales meet!)
 
@@ -29,7 +29,7 @@ from mcp.types import TextContent, Tool
 from mcpstat import MCPStat
 
 # =============================================================================
-# Setup - Just 3 lines!
+# Setup - Just 2 lines!
 # =============================================================================
 
 app = Server("temp-converter")
@@ -72,10 +72,8 @@ async def list_tools() -> list[Tool]:
 
 
 @app.call_tool()
+@stat.track  # ← One decorator: tracks usage + latency automatically!
 async def handle_tool(name: str, arguments: dict) -> list[TextContent]:
-    # Record usage - add this ONE line to every handler
-    await stat.record(name, "tool")
-
     if name == "celsius_to_fahrenheit":
         c = arguments.get("celsius", 0)
         f = (c * 9 / 5) + 32
