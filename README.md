@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/tekkidev-mcpstat-badge.png)](https://mseep.ai/app/tekkidev-mcpstat)
+
 # mcpstat
 
 [![PyPI - Version](https://img.shields.io/pypi/v/mcpstat)](https://pypi.org/project/mcpstat/)
