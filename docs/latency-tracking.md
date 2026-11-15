@@ -26,7 +26,7 @@ from mcpstat import MCPStat
 app = Server("my-server")
 stat = MCPStat("my-server")
 
-@app.call_tool()
+
 @stat.track  # ← Automatic latency tracking!
 async def handle_tool(name: str, arguments: dict):
     return await my_logic(arguments)
@@ -61,17 +61,13 @@ If you need to pass additional data (tokens, response size), use `record()` dire
 ```python
 import time
 
-@app.call_tool()
+
 async def handle_tool(name: str, arguments: dict):
     start = time.perf_counter()
     result = await my_logic(arguments)
     duration_ms = int((time.perf_counter() - start) * 1000)
 
-    await stat.record(
-        name, "tool",
-        duration_ms=duration_ms,
-        response_chars=len(str(result))
-    )
+    await stat.record(name, "tool", duration_ms=duration_ms, response_chars=len(str(result)))
     return result
 ```
 
@@ -100,7 +96,7 @@ stats = await stat.get_stats()
             "total_duration_ms": 5000,  # Total time spent
             "min_duration_ms": 100,     # Fastest call
             "max_duration_ms": 1200,    # Slowest call
-            "avg_latency_ms": 500,      # Average per call
+            "avg_latency_ms": 500,      # Average per measured call
             ...
         }
     ]
@@ -114,7 +110,8 @@ stats = await stat.get_stats()
 | `total_duration_ms` | Cumulative execution time in milliseconds |
 | `min_duration_ms` | Fastest recorded execution (NULL if no data) |
 | `max_duration_ms` | Slowest recorded execution (NULL if no data) |
-| `avg_latency_ms` | Average duration per call |
+| `avg_latency_ms` | Average duration per measured call, or `None` if unknown |
+| `duration_sample_count` | Number of calls with duration measurements |
 
 ---
 
@@ -129,9 +126,9 @@ stats = await stat.get_stats()
 
 # Sort by average latency
 by_latency = sorted(
-    [s for s in stats["stats"] if s["avg_latency_ms"] > 0],
+    [s for s in stats["stats"] if s["avg_latency_ms"] is not None and s["avg_latency_ms"] > 0],
     key=lambda s: s["avg_latency_ms"],
-    reverse=True
+    reverse=True,
 )
 
 print("Slowest tools:")
@@ -175,10 +172,12 @@ Identify tools with inconsistent performance:
 
 ```python
 for tool in stats["stats"]:
-    if tool["min_duration_ms"] and tool["max_duration_ms"]:
+    if tool["min_duration_ms"] is not None and tool["max_duration_ms"] is not None:
         variance = tool["max_duration_ms"] - tool["min_duration_ms"]
         if variance > 500:  # More than 500ms variance
-            print(f"⚠️ {tool['name']}: high variance ({tool['min_duration_ms']}-{tool['max_duration_ms']}ms)")
+            print(
+                f"⚠️ {tool['name']}: high variance ({tool['min_duration_ms']}-{tool['max_duration_ms']}ms)"
+            )
 ```
 
 ---
@@ -190,17 +189,13 @@ Track both tokens and latency for comprehensive analytics:
 ```python
 import time
 
-@app.call_tool()
+
 async def handle_tool(name: str, arguments: dict):
     start = time.perf_counter()
     result = await my_logic(arguments)
     duration_ms = int((time.perf_counter() - start) * 1000)
 
-    await stat.record(
-        name, "tool",
-        response_chars=len(str(result)),
-        duration_ms=duration_ms
-    )
+    await stat.record(name, "tool", response_chars=len(str(result)), duration_ms=duration_ms)
     return result
 ```
 
@@ -259,9 +254,9 @@ Define acceptable latency thresholds per tool type:
 
 ```python
 BUDGETS = {
-    "cache_lookup": 50,    # 50ms for cached data
-    "api_call": 2000,      # 2s for external APIs
-    "computation": 500,    # 500ms for local processing
+    "cache_lookup": 50,  # 50ms for cached data
+    "api_call": 2000,  # 2s for external APIs
+    "computation": 500,  # 500ms for local processing
 }
 ```
 
@@ -276,3 +271,18 @@ for tool in stats["stats"]:
     if tool["call_count"] > 100:  # Enough data
         print(f"{tool['name']}: {tool['avg_latency_ms']}ms avg over {tool['call_count']} calls")
 ```
+
+## Measurement boundaries
+
+Averages divide by `duration_sample_count`, excluding calls without duration data. Zero
+milliseconds is a valid sample; omitted or negative durations are unmeasured. Historical
+rows without a known sample count return `None` for their average. Handle that value before
+sorting or comparing averages.
+
+Timing covers handler execution and excludes subsequent statistics persistence. Returned
+MCP errors, exceptions, cancellation, and input-required results have distinct outcomes.
+A task handle measures submission, not background completion. Counters are cumulative;
+trend analysis requires storing periodic snapshots or using a tracing backend.
+
+The dispatch examples above show instrumentation; register them through SDK v2 constructor
+adapters as shown in the [quick start](quickstart.md).

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.tekkidev/mcpstat",
+  "title": "mcpstat",
+  "description": "mcpstat documentation and demo server with local usage statistics, a tool catalog, and conversions.",
+  "repository": {
+    "url": "https://github.com/tekkidev/mcpstat",
+    "source": "github"
+  },
+  "version": "0.3.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "mcpstat",
+      "version": "0.3.0",
+      "registryBaseUrl": "https://pypi.org",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "OTEL_SDK_DISABLED",
+          "value": "true",
+          "description": "Disable OpenTelemetry SDK signals for this server process."
+        },
+        {
+          "name": "OTEL_PROPAGATORS",
+          "value": "none",
+          "description": "Disable OpenTelemetry context and baggage propagation."
+        }
+      ],
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--with",
+          "value": "mcpstat[server]==0.3.0"
+        }
+      ]
+    }
+  ]
+}

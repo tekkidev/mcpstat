@@ -13,13 +13,14 @@ All configuration is passed at initialization time.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import functools
 import os
 import sys
 import time
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, overload
 
 from mcpstat.database import MCPStatDatabase
 from mcpstat.logging import MCPStatLogger
@@ -68,7 +69,7 @@ class MCPStat:
         )
 
         # In your tool handler
-        @app.call_tool()
+        @app.tool()
         async def handle_tool(name: str, arguments: dict):
             await stat.record(name, "tool")
             # ... your logic
@@ -80,7 +81,7 @@ class MCPStat:
         MCPSTAT_LOG_ENABLED: Override log_enabled (true/1/yes)
 
     Thread Safety:
-        All async methods are thread-safe via asyncio.Lock in database layer.
+        Database operations run in worker threads and use serialized transactions.
     """
 
     __slots__ = (
@@ -113,7 +114,7 @@ class MCPStat:
             log_path: Path to log file (default: ./mcp_stat.log)
             log_enabled: Enable file logging (default: False, or env var)
             metadata_presets: Pre-defined tool metadata {name: {tags, short}}
-            cleanup_orphans: Auto-remove metadata for unregistered tools
+            cleanup_orphans: Deactivate unregistered tools without deleting usage
 
         Environment Variable Overrides:
             MCPSTAT_DB_PATH: Override db_path
@@ -139,7 +140,7 @@ class MCPStat:
             self.log_enabled = log_enabled if log_enabled is not None else False
 
         # Initialize components
-        self._db = MCPStatDatabase(self.db_path)
+        self._db = MCPStatDatabase(self.db_path, server_name)
         self._logger = MCPStatLogger(self.log_path if self.log_enabled else None)
 
     async def record(
@@ -148,6 +149,7 @@ class MCPStat:
         primitive_type: Literal["tool", "prompt", "resource"] = "tool",
         *,
         success: bool = True,
+        outcome: str | None = None,
         error_msg: str | None = None,
         response_chars: int | None = None,
         input_tokens: int | None = None,
@@ -156,14 +158,14 @@ class MCPStat:
     ) -> None:
         """Record a tool/prompt/resource invocation.
 
-        Call this at the START of handlers to guarantee 100% coverage.
+        Call after execution to record the final outcome.
         Optionally pass response size, token counts, or duration for analytics.
 
         Args:
             name: Name of the primitive being invoked
             primitive_type: Type of MCP primitive
             success: Whether invocation succeeded
-            error_msg: Error message for failures (logged only)
+            error_msg: Accepted for compatibility; not stored or logged
             response_chars: Response size in characters (for token estimation)
             input_tokens: Actual input token count (if known from LLM API)
             output_tokens: Actual output token count (if known from LLM API)
@@ -171,7 +173,7 @@ class MCPStat:
 
         Example:
             ```python
-            @app.call_tool()
+            @app.tool()
             async def handle_tool(name: str, arguments: dict):
                 await stat.record(name, "tool")
                 # ... your logic
@@ -189,7 +191,14 @@ class MCPStat:
             ```
         """
         # File logging (if enabled)
-        self._logger.log(name, primitive_type, success=success, error_msg=error_msg)
+        await asyncio.to_thread(
+            self._logger.log,
+            name,
+            primitive_type,
+            success=success,
+            error_msg=error_msg,
+            outcome=outcome,
+        )
 
         # SQLite tracking
         try:
@@ -200,16 +209,19 @@ class MCPStat:
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 duration_ms=duration_ms,
+                outcome=outcome or ("success" if success else "error"),
             )
         except Exception as exc:
             # Never fail the main flow due to tracking
-            print(f"[mcpstat] SQLite tracking failed for {name}: {exc}", file=sys.stderr)
+            print(f"[mcpstat] SQLite tracking failed ({type(exc).__name__})", file=sys.stderr)
 
     async def report_tokens(
         self,
         name: str,
         input_tokens: int,
         output_tokens: int,
+        *,
+        primitive_type: Literal["tool", "prompt", "resource"] = "tool",
     ) -> None:
         """Report token usage for a previously recorded call.
 
@@ -234,9 +246,9 @@ class MCPStat:
             ```
         """
         try:
-            await self._db.report_tokens(name, input_tokens, output_tokens)
+            await self._db.report_tokens(name, input_tokens, output_tokens, primitive_type)
         except Exception as exc:
-            print(f"[mcpstat] Token reporting failed for {name}: {exc}", file=sys.stderr)
+            print(f"[mcpstat] Token reporting failed ({type(exc).__name__})", file=sys.stderr)
 
     async def get_stats(
         self,
@@ -371,6 +383,7 @@ class MCPStat:
                 tags=tags,
                 short_description=short,
                 full_description=description,
+                primitive_type="prompt",
             )
 
     async def sync_resources(self, resources: list[Any]) -> None:
@@ -382,7 +395,7 @@ class MCPStat:
             resources: List of MCP Resource objects (with .name, .description)
         """
         for resource in resources:
-            name = getattr(resource, "name", None) or str(getattr(resource, "uri", "unknown"))
+            name = str(getattr(resource, "uri", None) or getattr(resource, "name", "unknown"))
             description = getattr(resource, "description", None)
             preset = self.metadata_presets.get(name, {})
 
@@ -398,6 +411,7 @@ class MCPStat:
                 tags=tags,
                 short_description=short,
                 full_description=description,
+                primitive_type="resource",
             )
 
     async def register_metadata(
@@ -441,11 +455,30 @@ class MCPStat:
         """
         self.metadata_presets[name] = {"tags": tags, "short": short}
 
+    @overload
+    def track(
+        self,
+        func: Callable[P, Awaitable[T]],
+        *,
+        primitive_type: Literal["tool", "prompt", "resource"] = "tool",
+        name: str | None = None,
+    ) -> Callable[P, Awaitable[T]]: ...
+
+    @overload
+    def track(
+        self,
+        func: None = None,
+        *,
+        primitive_type: Literal["tool", "prompt", "resource"] = "tool",
+        name: str | None = None,
+    ) -> Callable[[Callable[P, Awaitable[T]]], Callable[P, Awaitable[T]]]: ...
+
     def track(
         self,
         func: Callable[P, Awaitable[T]] | None = None,
         *,
         primitive_type: Literal["tool", "prompt", "resource"] = "tool",
+        name: str | None = None,
     ) -> (
         Callable[P, Awaitable[T]] | Callable[[Callable[P, Awaitable[T]]], Callable[P, Awaitable[T]]]
     ):
@@ -454,20 +487,20 @@ class MCPStat:
         Wraps an async handler function to automatically record:
         - Call count
         - Execution time (latency)
-        - Response size (optional, from return value)
+        - Outcome, including errors and cancellation
 
         Can be used with or without parentheses:
 
         Example:
             ```python
             # Simple usage - tracks latency automatically
-            @app.call_tool()
+            @app.tool()
             @stat.track
             async def handle_tool(name: str, arguments: dict):
                 return await my_logic(arguments)
 
             # With explicit type
-            @app.call_tool()
+            @app.tool()
             @stat.track(primitive_type="tool")
             async def handle_tool(name: str, arguments: dict):
                 return await my_logic(arguments)
@@ -485,18 +518,29 @@ class MCPStat:
             @functools.wraps(fn)
             async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
                 # Extract name from first positional arg (MCP convention)
-                name = args[0] if args else kwargs.get("name", fn.__name__)
-                if not isinstance(name, str):
-                    name = fn.__name__
+                tracked_name = name or (args[0] if args else kwargs.get("name", fn.__name__))
+                if not isinstance(tracked_name, str):
+                    tracked_name = fn.__name__
 
                 start = time.perf_counter()
                 error_msg: str | None = None
                 success = True
+                outcome = "success"
 
                 try:
                     result = await fn(*args, **kwargs)
+                    if getattr(result, "is_error", False) or getattr(result, "isError", False):
+                        success = False
+                        outcome = "error"
+                    elif getattr(result, "result_type", None) == "input_required":
+                        outcome = "incomplete"
                     return result
+                except asyncio.CancelledError:
+                    success = False
+                    outcome = "cancelled"
+                    raise
                 except Exception as exc:
+                    outcome = "error"
                     success = False
                     error_msg = str(exc)
                     raise
@@ -504,9 +548,10 @@ class MCPStat:
                     duration_ms = int((time.perf_counter() - start) * 1000)
                     with contextlib.suppress(Exception):  # nosec B110
                         await self.record(
-                            name,
+                            tracked_name,
                             primitive_type,
                             success=success,
+                            outcome=outcome,
                             error_msg=error_msg,
                             duration_ms=duration_ms,
                         )
@@ -547,10 +592,16 @@ class MCPStat:
         start = time.perf_counter()
         error_msg: str | None = None
         success = True
+        outcome = "success"
 
         try:
             yield
+        except asyncio.CancelledError:
+            success = False
+            outcome = "cancelled"
+            raise
         except Exception as exc:
+            outcome = "error"
             success = False
             error_msg = str(exc)
             raise
@@ -561,6 +612,7 @@ class MCPStat:
                     name,
                     primitive_type,
                     success=success,
+                    outcome=outcome,
                     error_msg=error_msg,
                     duration_ms=duration_ms,
                 )

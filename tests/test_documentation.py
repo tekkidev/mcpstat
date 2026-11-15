@@ -83,7 +83,7 @@ class TestDocumentation:
         content = changelog_path.read_text()
 
         assert "# Changelog" in content, "CHANGELOG should have title"
-        assert "[Unreleased]" in content, "CHANGELOG should have Unreleased section"
+        assert "[0.3.0]" in content
         assert "Keep a Changelog" in content, "CHANGELOG should reference Keep a Changelog"
 
     def test_quickstart_mentions_mcpstat(self, docs_path: Path) -> None:

@@ -31,7 +31,7 @@ stat = MCPStat(
 | `log_path` | `str` | `./mcp_stat.log` | File log path |
 | `log_enabled` | `bool` | `False` | Enable file logging |
 | `metadata_presets` | `dict` | `None` | Pre-defined metadata |
-| `cleanup_orphans` | `bool` | `True` | Remove metadata for unregistered tools on sync |
+| `cleanup_orphans` | `bool` | `True` | Deactivate unregistered tools in the catalog while retaining usage |
 
 ---
 
@@ -42,7 +42,6 @@ stat = MCPStat(
 Decorator that automatically tracks tool calls with latency measurement.
 
 ```python
-@app.call_tool()
 @stat.track  # ← One decorator does everything!
 async def handle_tool(name: str, arguments: dict):
     return await my_logic(arguments)
@@ -89,6 +88,7 @@ await stat.record(
     primitive_type: Literal["tool", "prompt", "resource"] = "tool",
     *,
     success: bool = True,
+    outcome: str | None = None,
     error_msg: str | None = None,
     response_chars: int | None = None,
     input_tokens: int | None = None,
@@ -102,7 +102,7 @@ await stat.record(
 | `name` | `str` | Name of the primitive |
 | `primitive_type` | `str` | Type: `tool`, `prompt`, or `resource` |
 | `success` | `bool` | Whether invocation succeeded |
-| `error_msg` | `str` | Error message for failures (logged only) |
+| `error_msg` | `str` | Accepted for compatibility; omitted from storage and logs |
 | `response_chars` | `int` | Response size for token estimation |
 | `input_tokens` | `int` | Actual input token count |
 | `output_tokens` | `int` | Actual output token count |
@@ -129,17 +129,17 @@ stats = await stat.get_stats(
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `include_zero` | `bool` | Include items with zero calls |
-| `limit` | `int` | Maximum results to return |
+| `limit` | `int` | 1-1000; default returns at most 1000 rows |
 | `type_filter` | `str` | Filter by primitive type |
 
 **Returns:**
 
 ```python
 {
-    "tracked_count": int,       # Total tracked items
-    "total_calls": int,         # Sum of all call counts
-    "zero_count": int,          # Items with zero calls
-    "latest_access": str,       # Most recent timestamp
+    "tracked_count": int,  # Total tracked items
+    "total_calls": int,  # Sum of all call counts
+    "zero_count": int,  # Items with zero calls
+    "latest_access": str,  # Most recent timestamp
     "token_summary": {
         "total_input_tokens": int,
         "total_output_tokens": int,
@@ -167,9 +167,14 @@ stats = await stat.get_stats(
             "total_duration_ms": int,
             "min_duration_ms": int | None,
             "max_duration_ms": int | None,
-            "avg_latency_ms": int,
+            "avg_latency_ms": int | None,
+            "duration_sample_count": int,
+            "success_count": int,
+            "error_count": int,
+            "cancelled_count": int,
+            "incomplete_count": int,
         }
-    ]
+    ],
 }
 ```
 
@@ -203,16 +208,16 @@ catalog = await stat.get_catalog(
 
 ```python
 {
-    "total_tracked": int,       # Total tools in catalog
-    "matched": int,             # Tools matching filters
-    "all_tags": list[str],      # Complete tag inventory
+    "total_tracked": int,  # Total tools in catalog
+    "matched": int,  # Tools matching filters before limit
+    "all_tags": list[str],  # Complete tag inventory
     "filters": {
         "tags": list[str],
         "query": str | None,
     },
     "include_usage": bool,
     "limit": int | None,
-    "total_calls": int | None,   # None when include_usage=False
+    "total_calls": int | None,  # None when include_usage=False
     "results": [
         {
             "name": str,
@@ -221,10 +226,10 @@ catalog = await stat.get_catalog(
             "full_description": str | None,
             "schema_version": int,
             "updated_at": str,
-            "call_count": int | None,   # None when include_usage=False
+            "call_count": int | None,  # None when include_usage=False
             "last_accessed": str | None,
         }
-    ]
+    ],
 }
 ```
 
@@ -239,6 +244,8 @@ await stat.report_tokens(
     name: str,
     input_tokens: int,
     output_tokens: int,
+    *,
+    primitive_type: str = "tool",
 )
 ```
 
@@ -252,11 +259,7 @@ await stat.record("my_tool", "tool")
 
 # Later, when you have actual tokens
 response = await anthropic.messages.create(...)
-await stat.report_tokens(
-    "my_tool",
-    response.usage.input_tokens,
-    response.usage.output_tokens
-)
+await stat.report_tokens("my_tool", response.usage.input_tokens, response.usage.output_tokens)
 ```
 
 ---
@@ -274,7 +277,7 @@ Auto-extracts tags from tool names and descriptions from tool definitions.
 **Example:**
 
 ```python
-tools = await server.list_tools()
+tools = await list_tools()
 await stat.sync_tools(tools)
 ```
 
@@ -456,12 +459,30 @@ Handle stats prompt request from MCP client.
 ```python
 from mcpstat.prompts import handle_stats_prompt
 
-result = await handle_stats_prompt(stat, arguments={"period": "past week"})
+result = await handle_stats_prompt(stat, arguments={"period": "all time"})
 ```
 
 ---
 
 ## Utility Functions
+
+### disable_sdk_tracing()
+
+Remove inbound MCP SDK tracing from one server instance without modifying its other
+middleware or global OpenTelemetry configuration. Requires the optional MCP SDK v2
+integration. Call it after constructing the server and before serving requests.
+
+```python
+from mcp.server import MCPServer
+from mcpstat import disable_sdk_tracing
+
+app = MCPServer("my-server")
+disable_sdk_tracing(app)
+```
+
+Both `Server` and `MCPServer` are supported. Calling it again is safe. Local mcpstat
+statistics remain enabled. For process-wide signals and propagation settings, see
+[SDK tracing configuration](configuration.md#sdk-tracing-and-local-statistics).
 
 ### normalize_tags()
 
@@ -470,9 +491,22 @@ Normalize and filter tags from text.
 ```python
 from mcpstat.utils import normalize_tags
 
-tags = normalize_tags(
-    ["Fetch", "Weather", "Data", "the"],
-    filter_stopwords=True
-)
+tags = normalize_tags(["Fetch", "Weather", "Data", "the"], filter_stopwords=True)
 # ["fetch", "weather", "data"]
 ```
+
+## Measurement and integration contracts
+
+- SDK v2 registers low-level handlers through `Server(on_call_tool=..., on_list_tools=...)`.
+  The dispatch functions above are library integration fragments. See the complete
+  [quick start](quickstart.md) and [server example](https://github.com/tekkidev/mcpstat/blob/main/examples/example_server.py)
+  for the SDK adapters. Individual `MCPServer` tools use `@stat.track(name="tool_name")`.
+- `outcome` accepts `success`, `error`, `cancelled`, or `incomplete`. Cancellation and
+  handler errors propagate. Tracking failures do not replace handler results.
+- Registered unused primitives appear in statistics. Summary counts cover the complete
+  filtered set, while `limit` caps returned rows. Catalog entries are active tools only.
+- Query text is limited to 1024 characters; tags accept up to 50 strings of 100 characters.
+- Periods accept only `all time`. Other values raise `ValueError`; counters are cumulative.
+- Report resources by full URI and tokens by the same primitive type as the invocation.
+- Token reporting adds to an existing identity without incrementing its call count.
+  Measurements must be nonnegative integers. Report each measurement once.

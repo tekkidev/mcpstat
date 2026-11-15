@@ -21,18 +21,18 @@ Run:
 import asyncio
 import json
 
-from mcp.server import NotificationOptions, Server
-from mcp.server.models import InitializationOptions
+import mcp_types as types
+from jsonschema import Draft202012Validator
+from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from mcp_types import TextContent, Tool
 
-from mcpstat import MCPStat
+from mcpstat import MCPStat, disable_sdk_tracing
 
 # =============================================================================
 # Setup - Just 2 lines!
 # =============================================================================
 
-app = Server("temp-converter")
 stat = MCPStat("temp-converter")  # That's it!
 
 
@@ -41,13 +41,12 @@ stat = MCPStat("temp-converter")  # That's it!
 # =============================================================================
 
 
-@app.list_tools()
 async def list_tools() -> list[Tool]:
     tools = [
         Tool(
             name="celsius_to_fahrenheit",
             description="Convert temperature from Celsius to Fahrenheit",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "celsius": {"type": "number", "description": "Temperature in Celsius"},
@@ -58,7 +57,7 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="fahrenheit_to_celsius",
             description="Convert temperature from Fahrenheit to Celsius",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "fahrenheit": {"type": "number", "description": "Temperature in Fahrenheit"},
@@ -71,24 +70,29 @@ async def list_tools() -> list[Tool]:
     return tools
 
 
-@app.call_tool()
 @stat.track  # ← One decorator: tracks usage + latency automatically!
 async def handle_tool(name: str, arguments: dict) -> list[TextContent]:
     if name == "celsius_to_fahrenheit":
-        c = arguments.get("celsius", 0)
+        c = arguments["celsius"]
         f = (c * 9 / 5) + 32
         return [
-            TextContent(type="text", text=json.dumps({"celsius": c, "fahrenheit": round(f, 2)}))
+            TextContent(
+                type="text",
+                text=json.dumps({"celsius": c, "fahrenheit": round(f, 2)}, allow_nan=False),
+            )
         ]
 
     if name == "fahrenheit_to_celsius":
-        f = arguments.get("fahrenheit", 0)
+        f = arguments["fahrenheit"]
         c = (f - 32) * 5 / 9
         return [
-            TextContent(type="text", text=json.dumps({"fahrenheit": f, "celsius": round(c, 2)}))
+            TextContent(
+                type="text",
+                text=json.dumps({"fahrenheit": f, "celsius": round(c, 2)}, allow_nan=False),
+            )
         ]
 
-    return [TextContent(type="text", text=json.dumps({"error": "Unknown tool"}))]
+    raise ValueError(f"Unknown tool: {name}")
 
 
 # =============================================================================
@@ -96,20 +100,34 @@ async def handle_tool(name: str, arguments: dict) -> list[TextContent]:
 # =============================================================================
 
 
-async def main():
-    async with stdio_server() as (read, write):
-        await app.run(
-            read,
-            write,
-            InitializationOptions(
-                server_name="temp-converter",
-                server_version="1.0.0",
-                capabilities=app.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
-                ),
-            ),
+async def _list_tools(_ctx, _params):
+    return types.ListToolsResult(tools=await list_tools())
+
+
+async def _call_tool(_ctx, params):
+    try:
+        arguments = params.arguments if params.arguments is not None else {}
+        tool = next((tool for tool in await list_tools() if tool.name == params.name), None)
+        if tool is None or not Draft202012Validator(tool.input_schema).is_valid(arguments):
+            raise ValueError("Invalid tool arguments")
+        return types.CallToolResult(content=await handle_tool(params.name, arguments))
+    except (ValueError, TypeError, KeyError, OverflowError):
+        return types.CallToolResult(
+            content=[TextContent(type="text", text="Invalid tool request")], is_error=True
         )
+
+
+app = Server("temp-converter", version="1.0.0", on_list_tools=_list_tools, on_call_tool=_call_tool)
+disable_sdk_tracing(app)
+
+
+async def main():
+    """Run the stdio server and release logging resources on shutdown."""
+    try:
+        async with stdio_server() as (read, write):
+            await app.run(read, write, app.create_initialization_options())
+    finally:
+        stat.close()
 
 
 if __name__ == "__main__":

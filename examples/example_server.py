@@ -27,10 +27,11 @@ import json
 import os
 from pathlib import Path
 
-from mcp.server import NotificationOptions, Server
-from mcp.server.models import InitializationOptions
+import mcp_types as types
+from jsonschema import Draft202012Validator
+from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import (
+from mcp_types import (
     GetPromptResult,
     Prompt,
     PromptArgument,
@@ -44,6 +45,7 @@ from mcpstat import (
     BuiltinToolsHandler,
     MCPStat,
     build_tool_definitions,
+    disable_sdk_tracing,
     generate_stats_prompt,
 )
 
@@ -53,7 +55,6 @@ from mcpstat import (
 
 _HERE = Path(__file__).parent
 
-app = Server("example-server")
 
 # Initialize mcpstat with metadata presets for better tool discovery
 stat = MCPStat(
@@ -100,7 +101,7 @@ def _build_tool_list() -> list[Tool]:
         Tool(
             name="celsius_to_fahrenheit",
             description="Convert temperature from Celsius to Fahrenheit",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "celsius": {"type": "number", "description": "Temperature in Celsius"},
@@ -111,7 +112,7 @@ def _build_tool_list() -> list[Tool]:
         Tool(
             name="fahrenheit_to_celsius",
             description="Convert temperature from Fahrenheit to Celsius",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "fahrenheit": {"type": "number", "description": "Temperature in Fahrenheit"},
@@ -127,7 +128,7 @@ def _build_tool_list() -> list[Tool]:
         Tool(
             name=t["name"],
             description=t["description"],
-            inputSchema=t["inputSchema"],
+            input_schema=t["inputSchema"],
         )
         for t in stats_tool_defs
     ]
@@ -135,7 +136,6 @@ def _build_tool_list() -> list[Tool]:
     return custom_tools + stats_tools
 
 
-@app.list_tools()
 async def list_tools() -> list[Tool]:
     """List available tools."""
     tools = _build_tool_list()
@@ -143,7 +143,6 @@ async def list_tools() -> list[Tool]:
     return tools
 
 
-@app.call_tool()
 @stat.track  # ← Automatic usage + latency tracking!
 async def handle_tool(name: str, arguments: dict) -> list[TextContent]:
     """Handle tool execution with automatic usage tracking."""
@@ -154,27 +153,27 @@ async def handle_tool(name: str, arguments: dict) -> list[TextContent]:
 
     # Custom tools
     if name == "celsius_to_fahrenheit":
-        c = arguments.get("celsius", 0)
+        c = arguments["celsius"]
         f = (c * 9 / 5) + 32
         return [
             TextContent(
                 type="text",
-                text=json.dumps({"celsius": c, "fahrenheit": round(f, 2)}),
+                text=json.dumps({"celsius": c, "fahrenheit": round(f, 2)}, allow_nan=False),
             )
         ]
 
     if name == "fahrenheit_to_celsius":
-        f = arguments.get("fahrenheit", 0)
+        f = arguments["fahrenheit"]
         c = (f - 32) * 5 / 9
         return [
             TextContent(
                 type="text",
-                text=json.dumps({"fahrenheit": f, "celsius": round(c, 2)}),
+                text=json.dumps({"fahrenheit": f, "celsius": round(c, 2)}, allow_nan=False),
             )
         ]
 
     # Unknown tool (still tracked above)
-    return [TextContent(type="text", text=json.dumps({"error": f"Unknown tool: {name}"}))]
+    raise ValueError(f"Unknown tool: {name}")
 
 
 # =============================================================================
@@ -182,7 +181,6 @@ async def handle_tool(name: str, arguments: dict) -> list[TextContent]:
 # =============================================================================
 
 
-@app.list_resources()
 async def list_resources() -> list[Resource]:
     """List available resources."""
     resources = [
@@ -190,26 +188,25 @@ async def list_resources() -> list[Resource]:
             uri="resource://example-server/readme",
             name="README.md",
             description="mcpstat package documentation and usage guide",
-            mimeType="text/markdown",
+            mime_type="text/markdown",
         ),
         Resource(
             uri="resource://example-server/tool-catalog",
             name="Tool Catalog",
             description="Tag-indexed tool catalog with usage statistics",
-            mimeType="text/markdown",
+            mime_type="text/markdown",
         ),
     ]
     await stat.sync_resources(resources)
     return resources
 
 
-@app.read_resource()
 async def read_resource(uri: str) -> str:
     """Read resource content with usage tracking via context manager."""
     # Extract resource name for tracking
     # Convert AnyUrl to string if needed (MCP SDK may pass AnyUrl instead of str)
     uri_str = str(uri)
-    resource_name = uri_str.split("/")[-1] if "/" in uri_str else uri_str
+    resource_name = uri_str
 
     # Use tracking() context manager when you need to compute the name first
     async with stat.tracking(resource_name, "resource"):
@@ -249,7 +246,6 @@ async def read_resource(uri: str) -> str:
 # =============================================================================
 
 
-@app.list_prompts()
 async def list_prompts() -> list[Prompt]:
     """List available prompts."""
     prompts = [
@@ -259,7 +255,7 @@ async def list_prompts() -> list[Prompt]:
             arguments=[
                 PromptArgument(
                     name="period",
-                    description="Time period (e.g., 'today', 'past week', 'all time')",
+                    description="Reporting period: all time",
                     required=False,
                 ),
                 PromptArgument(
@@ -274,7 +270,6 @@ async def list_prompts() -> list[Prompt]:
     return prompts
 
 
-@app.get_prompt()
 @stat.track(primitive_type="prompt")  # ← Decorator with explicit type
 async def get_prompt(name: str, arguments: dict | None = None) -> GetPromptResult:
     """Get prompt with automatic tracking."""
@@ -310,21 +305,65 @@ async def get_prompt(name: str, arguments: dict | None = None) -> GetPromptResul
 # =============================================================================
 
 
-async def main():
-    """Main entry point."""
-    async with stdio_server() as (read, write):
-        await app.run(
-            read,
-            write,
-            InitializationOptions(
-                server_name="example-server",
-                server_version="1.0.0",
-                capabilities=app.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
-                ),
-            ),
+async def _list_tools(_ctx, _params):
+    return types.ListToolsResult(tools=await list_tools())
+
+
+async def _call_tool(_ctx, params):
+    try:
+        arguments = params.arguments if params.arguments is not None else {}
+        tool = next((tool for tool in await list_tools() if tool.name == params.name), None)
+        if tool is None or not Draft202012Validator(tool.input_schema).is_valid(arguments):
+            raise ValueError("Invalid tool arguments")
+        return types.CallToolResult(content=await handle_tool(params.name, arguments))
+    except (ValueError, TypeError, KeyError, OverflowError):
+        return types.CallToolResult(
+            content=[TextContent(type="text", text="Invalid tool request")], is_error=True
         )
+
+
+async def _list_resources(_ctx, _params):
+    return types.ListResourcesResult(resources=await list_resources())
+
+
+async def _read_resource(_ctx, params):
+    return types.ReadResourceResult(
+        contents=[
+            types.TextResourceContents(
+                uri=params.uri, mime_type="text/markdown", text=await read_resource(params.uri)
+            )
+        ]
+    )
+
+
+async def _list_prompts(_ctx, _params):
+    return types.ListPromptsResult(prompts=await list_prompts())
+
+
+async def _get_prompt(_ctx, params):
+    return await get_prompt(params.name, params.arguments)
+
+
+app = Server(
+    "example-server",
+    version="1.0.0",
+    on_list_tools=_list_tools,
+    on_call_tool=_call_tool,
+    on_list_resources=_list_resources,
+    on_read_resource=_read_resource,
+    on_list_prompts=_list_prompts,
+    on_get_prompt=_get_prompt,
+)
+disable_sdk_tracing(app)
+
+
+async def main():
+    """Run the stdio server and release logging resources on shutdown."""
+    try:
+        async with stdio_server() as (read, write):
+            await app.run(read, write, app.create_initialization_options())
+    finally:
+        stat.close()
 
 
 if __name__ == "__main__":

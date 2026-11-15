@@ -46,7 +46,7 @@ repos:
 
   # Ruff - fast Python linter and formatter
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.4
+    rev: v0.17.5
     hooks:
       - id: ruff
         args: [--fix]
@@ -54,19 +54,20 @@ repos:
 
   # Type checking with mypy
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.14.1
+    rev: v2.4.1
     hooks:
       - id: mypy
         args: [--ignore-missing-imports]
-        additional_dependencies: []
+        additional_dependencies: ["mcp>=2.3,<3", "platformdirs>=4.9,<5"]
         exclude: ^(tests/|examples/)
 
   # Security checks with bandit
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.8.0
+    rev: 1.9.4
     hooks:
       - id: bandit
         args: ['-c', 'pyproject.toml', '-r', 'mcpstat/']
+        pass_filenames: false
         additional_dependencies: ['bandit[toml]']
         exclude: ^tests/
 
@@ -75,7 +76,7 @@ repos:
     hooks:
       - id: pytest-check
         name: pytest quick check
-        entry: python -m pytest tests/ -q --tb=no
+        entry: python -m pytest tests/ -q --tb=short
         language: system
         pass_filenames: false
         always_run: true

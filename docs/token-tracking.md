@@ -18,15 +18,11 @@ MCP servers don't have direct access to LLM token counts - tokens are returned t
 Track response sizes for automatic token estimation:
 
 ```python
-@app.call_tool()
 async def handle_tool(name: str, arguments: dict):
     result = await my_logic(arguments)
 
     # Record with response size for token estimation
-    await stat.record(
-        name, "tool",
-        response_chars=len(str(result))
-    )
+    await stat.record(name, "tool", response_chars=len(str(result)))
     return result
 ```
 
@@ -41,11 +37,7 @@ If you have access to actual token counts from your LLM provider:
 ### Method 1: Record with Tokens
 
 ```python
-await stat.record(
-    name, "tool",
-    input_tokens=100,
-    output_tokens=250
-)
+await stat.record(name, "tool", input_tokens=100, output_tokens=250)
 ```
 
 ### Method 2: Deferred Reporting
@@ -56,11 +48,7 @@ await stat.record("my_tool", "tool")
 
 # Later, when tokens are available
 response = await anthropic.messages.create(...)
-await stat.report_tokens(
-    "my_tool",
-    response.usage.input_tokens,
-    response.usage.output_tokens
-)
+await stat.report_tokens("my_tool", response.usage.input_tokens, response.usage.output_tokens)
 ```
 
 ---
@@ -148,9 +136,7 @@ stats = await stat.get_stats()
 
 # Sort by total tokens
 by_tokens = sorted(
-    stats["stats"],
-    key=lambda s: s["total_input_tokens"] + s["total_output_tokens"],
-    reverse=True
+    stats["stats"], key=lambda s: s["total_input_tokens"] + s["total_output_tokens"], reverse=True
 )
 
 for tool in by_tokens[:5]:
@@ -198,10 +184,7 @@ Token tracking adds these columns to `mcpstat_usage`:
 Even without actual tokens, tracking response sizes provides useful estimates:
 
 ```python
-await stat.record(
-    name, "tool",
-    response_chars=len(json.dumps(result))
-)
+await stat.record(name, "tool", response_chars=len(json.dumps(result)))
 ```
 
 ### 2. Use Deferred Reporting for Accuracy
@@ -211,11 +194,7 @@ When actual tokens are available, use `report_tokens()`:
 ```python
 # In your client code
 response = await client.messages.create(...)
-await stat.report_tokens(
-    tool_name,
-    response.usage.input_tokens,
-    response.usage.output_tokens
-)
+await stat.report_tokens(tool_name, response.usage.input_tokens, response.usage.output_tokens)
 ```
 
 ### 3. Monitor High-Token Tools
@@ -227,3 +206,18 @@ for tool in stats["stats"]:
     if tool["avg_tokens_per_call"] > 500:
         print(f"Review: {tool['name']}")
 ```
+
+## Attribution and measurement limits
+
+The decorator does not serialize results or infer token measurements automatically.
+`response_chars` is a rough text-size estimate, not a tokenizer or a billing measurement.
+Actual and estimated totals remain separate. Supplied measurements must be nonnegative
+integers; repeated `report_tokens()` calls add usage and are not idempotent.
+
+Provider usage covers a model request, which can include several tools and other context.
+Attribute it according to the application's accounting rules rather than counting the
+whole request once per tool. Use separate input and output rates for cost calculations
+when the provider charges differently. The example rate above is illustrative.
+
+The dispatch examples show library instrumentation; use the SDK v2 registration pattern
+in the [quick start](quickstart.md) for a complete server.

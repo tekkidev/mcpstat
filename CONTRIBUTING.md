@@ -37,6 +37,7 @@ Please read and follow our [Code of Conduct](https://github.com/tekkidev/mcpstat
 
 ```bash
 # Run all tests with coverage (configured in pyproject.toml)
+python build_package.py
 pytest
 
 # Run specific test file
@@ -69,7 +70,7 @@ ruff check . --fix
 - Follow PEP 8 for Python code
 - Use snake_case for functions and variables
 - Use CamelCase for class names
-- Maximum line length: 127 characters
+- Maximum line length: 100 characters
 
 ### Code Quality Tools
 
@@ -190,3 +191,26 @@ Include:
 ---
 
 Thank you for contributing to mcpstat! 🎉
+
+## Package verification
+
+```bash
+python -m pip install -e '.[dev]' build twine bandit pip-audit
+python build_package.py
+python -m pytest
+python -m ruff check mcpstat
+python -m mypy mcpstat
+python -m bandit -c pyproject.toml -r mcpstat
+python -m pip_audit
+python -m build
+python -m twine check --strict dist/*
+```
+
+Verify a wheel in a clean environment outside the checkout with
+`tests/verify_distribution.py`. It launches a local stdio server using synthetic data
+and exercises tools, resources, prompts, and persistence.
+
+The publishing workflow defaults to a dry run. Publication requires a matching version
+tag in `tekkidev/mcpstat` and a PyPI Trusted Publisher configured for `pypi-publish.yaml` and
+the `pypi` environment. Source checks, distribution validation, and the installed-wheel
+exchange must pass before the publishing job receives OIDC permission.

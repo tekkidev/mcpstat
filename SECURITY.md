@@ -4,6 +4,7 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 0.3.x   | :white_check_mark: |
 | 0.2.x   | :white_check_mark: |
 | 0.1.x   | :white_check_mark: |
 
@@ -32,3 +33,7 @@ mcpstat stores data locally:
 - **Log files**: Optional audit logs stored in `./mcp_stat.log`
 
 Ensure appropriate file permissions for sensitive deployments.
+
+Logs omit arguments, results, and exception messages. Resource names can still contain
+sensitive data. Restrict filesystem access and authorize analytics tools in the host
+server. Local statistics and logs are mutable and do not provide tamper-proof evidence.

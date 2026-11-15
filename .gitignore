@@ -54,6 +54,9 @@ Thumbs.db
 *.sqlite-wal
 *.sqlite-shm
 
+# MkDocs build output
+site/
+
 # Hypothesis (property-based testing) configurations
 .hypothesis/
 
@@ -62,3 +65,5 @@ Thumbs.db
 .pydevproject
 .project
 .settings
+
+mcpstat/_docs/

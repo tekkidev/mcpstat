@@ -39,7 +39,11 @@ async def generate_stats_prompt(
     Returns:
         Formatted markdown prompt text
     """
+    if period != "all time":
+        raise ValueError("Only all-time statistics are available")
     type_filter = type_filter.lower()
+    if type_filter not in {"all", "tool", "prompt", "resource"}:
+        raise ValueError("Invalid type filter")
 
     # Fetch usage data grouped by type
     data = await stat.get_by_type()
@@ -149,7 +153,7 @@ def build_prompt_definition(
         "arguments": [
             {
                 "name": "period",
-                "description": "Time period description (e.g., 'past week', 'since deployment')",
+                "description": "Reporting period: all time",
                 "required": False,
             },
             {

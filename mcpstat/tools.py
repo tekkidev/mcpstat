@@ -50,6 +50,8 @@ def build_tool_definitions(
                     },
                     "limit": {
                         "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000,
                         "description": "Maximum number of items to return (sorted by usage)",
                     },
                 },
@@ -64,12 +66,14 @@ def build_tool_definitions(
                 "properties": {
                     "tags": {
                         "type": "array",
-                        "items": {"type": "string"},
+                        "maxItems": 50,
+                        "items": {"type": "string", "maxLength": 100},
                         "description": "Filter to tools containing all provided tags",
                     },
                     "query": {
                         "type": "string",
                         "description": "Text search across names, descriptions, and tags",
+                        "maxLength": 1024,
                     },
                     "include_usage": {
                         "type": "boolean",
@@ -78,6 +82,8 @@ def build_tool_definitions(
                     },
                     "limit": {
                         "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000,
                         "description": "Maximum entries to return",
                     },
                 },

@@ -5,23 +5,26 @@ https://github.com/tekkidev/mcpstat
 Copyright (c) 2026 Vadim Bakhrenkov
 SPDX-License-Identifier: MIT
 
-A pure-stdlib Python package for adding SQLite-backed usage statistics,
-optional file logging, and built-in analytics to Model Context Protocol servers.
+A Python package for adding SQLite-backed usage statistics, optional file
+logging, and built-in analytics to Model Context Protocol servers.
+The server integration uses MCP SDK >=2.3,<3; the tracking core is SDK-independent.
 
 ## Quick Start
 
 ```python
-from mcp.server import Server
-from mcpstat import MCPStat
+from mcp.server import MCPServer
+from mcpstat import MCPStat, disable_sdk_tracing
 
-app = Server("my-server")
+app = MCPServer("my-server")
+disable_sdk_tracing(app)
 stat = MCPStat("my-server")
 
 # One decorator - automatic latency tracking!
-@app.call_tool()
-@stat.track
-async def handle_tool(name: str, arguments: dict):
-    return await my_logic(arguments)  # Latency tracked automatically
+@app.tool()
+@stat.track(name="echo")
+async def echo(message: str) -> str:
+    # Return a message.
+    return message
 ```
 
 ## Features
@@ -32,8 +35,8 @@ async def handle_tool(name: str, arguments: dict):
 - Built-in stats query functions
 - Stats prompt generator for LLM consumption
 - Metadata enrichment (tags, descriptions)
-- Async-first, thread-safe design
-- No required dependencies (pure Python stdlib)
+- Async-first design with database operations in worker threads
+- Server integration supports MCP SDK >=2.3,<3
 
 ## Configuration
 
@@ -59,7 +62,7 @@ Environment variables (optional override):
 
 from __future__ import annotations
 
-__version__ = "0.2.2"
+__version__ = "0.3.0"
 __author__ = "Vadim Bakhrenkov"
 __license__ = "MIT"
 
@@ -67,6 +70,7 @@ from mcpstat.core import MCPStat
 from mcpstat.database import MCPStatDatabase
 from mcpstat.logging import MCPStatLogger
 from mcpstat.prompts import build_prompt_definition, generate_stats_prompt
+from mcpstat.sdk import disable_sdk_tracing
 from mcpstat.tools import BuiltinToolsHandler, build_tool_definitions
 from mcpstat.utils import derive_short_description, normalize_tags
 
@@ -79,6 +83,7 @@ __all__ = [
     "build_prompt_definition",
     "build_tool_definitions",
     "derive_short_description",
+    "disable_sdk_tracing",
     "generate_stats_prompt",
     "normalize_tags",
 ]

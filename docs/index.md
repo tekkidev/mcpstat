@@ -4,9 +4,16 @@
 [![GitHub License](https://img.shields.io/github/license/tekkidev/mcpstat?color=yellow)](https://github.com/tekkidev/mcpstat/blob/main/LICENSE)
 [![PyPI - Python Version](https://img.shields.io/badge/python-3.10+-blue.svg)](https://pypi.org/project/mcpstat/)
 
-**mcpstat** adds usage tracking and analytics to your [MCP (Model Context Protocol)](https://modelcontextprotocol.io) servers. Pure Python stdlib, no required dependencies.
+**mcpstat** is a Python observability and usage analytics library for [MCP (Model Context Protocol)](https://modelcontextprotocol.io) servers.
 
-Track which tools get called, how often, and keep an audit trail - all in 3 lines of code. Then ask your AI assistant: *"Give me MCP usage stats."*
+Track tool, prompt, and resource calls, successful and failed invocations, and execution
+latency in local SQLite storage. Instrument your existing server and register its
+analytics tools, then ask your AI assistant: *"Give me MCP usage stats."* Optional file
+logging provides an audit trail. The core library is SDK-independent; the bundled
+documentation and demonstration server tracks its own activity.
+
+Follow the [weather server walkthrough](quickstart.md#verify-mcp-tool-usage-with-a-weather-server)
+to send real MCP requests, inspect the resulting counters, and verify restart persistence.
 
 ---
 
@@ -33,7 +40,7 @@ Without tracking, agents may pull irrelevant resources into context - leading to
 - **Metadata enrichment** - Tag and describe tools for discoverability
 - **Token tracking** - Estimate or record actual token usage
 - **Latency tracking** - Measure execution time, identify slow tools
-- **Async-first** - Thread-safe via `asyncio.Lock`
+- **Async-first** - Database operations run in worker threads with serialized transactions
 
 ---
 
@@ -42,28 +49,25 @@ Without tracking, agents may pull irrelevant resources into context - leading to
 ### Installation
 
 ```bash
-pip install mcpstat
-```
-
-For MCP SDK integration:
-
-```bash
-pip install "mcpstat[mcp]"
+pip install "mcpstat[server]"
 ```
 
 ### Minimal Integration
 
 ```python
-from mcp.server import Server
-from mcpstat import MCPStat
+from mcp.server import MCPServer
+from mcpstat import MCPStat, disable_sdk_tracing
 
-app = Server("my-server")
+app = MCPServer("my-server")
+disable_sdk_tracing(app)
 stat = MCPStat("my-server")
 
-@app.call_tool()
-@stat.track  # ← One decorator does everything!
-async def handle_tool(name: str, arguments: dict):
-    return await my_logic(arguments)  # Latency tracked automatically
+
+@app.tool()
+@stat.track(name="echo")
+async def echo(message: str) -> str:
+    """Return a message, measuring usage and execution time."""
+    return message
 ```
 
 One decorator - `@stat.track` - and you get full tracking with automatic latency measurement.
@@ -72,7 +76,8 @@ One decorator - `@stat.track` - and you get full tracking with automatic latency
 
 ## Built-in Tools
 
-mcpstat exposes two tools that AI assistants can call directly:
+mcpstat provides definitions and handlers for two analytics tools. Register them in your
+server as shown in the [full integration pattern](quickstart.md#full-integration-pattern):
 
 | Tool | Purpose | Key Parameters |
 |------|---------|----------------|
@@ -92,6 +97,10 @@ The AI invokes `get_tool_usage_stats` or `get_tool_catalog` as needed.
 ---
 
 ## Documentation
+
+[Agent documentation index](https://mcpstat.vadim.dev/llms.txt) and
+[full agent reference](https://mcpstat.vadim.dev/llms-full.txt) provide plain-text entry
+points. The documentation website also links each page to its Markdown source.
 
 <div class="grid cards" markdown>
 

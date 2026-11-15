@@ -121,8 +121,13 @@ class TestMCPStatLogger:
             logger.close()
 
             content = log_file.read_text()
-            assert "tool:test_tool|OK" in content
-            assert "prompt:test_prompt|FAIL|Error" in content
+            import json
+
+            events = [json.loads(line) for line in content.splitlines()]
+            assert events[0]["name"] == "test_tool"
+            assert events[0]["outcome"] == "success"
+            assert events[1]["outcome"] == "error"
+            assert "Error" not in content
 
     def test_creates_directory(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -494,8 +499,8 @@ class TestLatencyTracking:
         assert tool_stat["total_duration_ms"] == 300
         assert tool_stat["min_duration_ms"] == 100
         assert tool_stat["max_duration_ms"] == 200
-        # Average is 300 / 3 = 100 (includes all calls, not just timed ones)
-        assert tool_stat["avg_latency_ms"] == 100
+        # Only measured calls contribute to the average.
+        assert tool_stat["avg_latency_ms"] == 150
 
     @pytest.mark.asyncio
     async def test_latency_negative_ignored(self, db_fixture):
@@ -823,7 +828,7 @@ class TestMCPStat:
             description = "A test prompt"
 
         await stat.sync_prompts([MockPrompt()])
-        catalog = await stat.get_catalog()
+        catalog = {"results": (await stat.get_stats())["stats"]}
         assert len(catalog["results"]) == 1
         assert catalog["results"][0]["name"] == "test_prompt"
 
@@ -838,7 +843,7 @@ class TestMCPStat:
             description = "Full description"
 
         await stat.sync_prompts([MockPrompt()])
-        catalog = await stat.get_catalog()
+        catalog = {"results": (await stat.get_stats())["stats"]}
         assert "custom" in catalog["results"][0]["tags"]
 
     @pytest.mark.asyncio
@@ -851,7 +856,7 @@ class TestMCPStat:
             description = "A test resource"
 
         await stat.sync_resources([MockResource()])
-        catalog = await stat.get_catalog()
+        catalog = {"results": (await stat.get_stats())["stats"]}
         assert len(catalog["results"]) == 1
         assert catalog["results"][0]["name"] == "test_resource"
 
@@ -865,7 +870,7 @@ class TestMCPStat:
             description = "A test resource"
 
         await stat.sync_resources([MockResource()])
-        catalog = await stat.get_catalog()
+        catalog = {"results": (await stat.get_stats())["stats"]}
         assert len(catalog["results"]) == 1
         assert "resource://test/data" in catalog["results"][0]["name"]
 
@@ -880,7 +885,7 @@ class TestMCPStat:
             description = "Full description"
 
         await stat.sync_resources([MockResource()])
-        catalog = await stat.get_catalog()
+        catalog = {"results": (await stat.get_stats())["stats"]}
         assert "data" in catalog["results"][0]["tags"]
 
     @pytest.mark.asyncio
@@ -1122,12 +1127,12 @@ class TestPrompts:
             result = await handle_stats_prompt(
                 stat,
                 arguments={
-                    "period": "last week",
+                    "period": "all time",
                     "type": "tool",
                     "include_recommendations": "no",
                 },
             )
-            assert "last week" in result["description"]
+            assert "all time" in result["description"]
             assert "Recommendations" not in result["messages"][0]["content"]["text"]
             stat.close()
 
@@ -1411,8 +1416,8 @@ class TestCoverageGaps:
             # Insert a zero-count row to simulate an unused tool in get_by_type
             conn = sqlite3.connect(db_path)
             conn.execute(
-                "INSERT INTO mcpstat_usage (name, type, call_count, last_accessed, created_at) "
-                "VALUES ('unused_tool', 'tool', 0, '2026-01-01T00:00:00', '2026-01-01T00:00:00')"
+                "INSERT INTO mcpstat_usage (server, name, type, call_count, last_accessed, created_at) "
+                "VALUES ('test', 'unused_tool', 'tool', 0, '2026-01-01T00:00:00', '2026-01-01T00:00:00')"
             )
             conn.commit()
             conn.close()

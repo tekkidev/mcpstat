@@ -5,7 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-11-15
+
+### Added
+
+- Bundled documentation and demo MCP server, `mcpstat` CLI, SDK v2 integration, and registry manifest.
+- Persistent success, error, cancellation, and incomplete counters; explicit names for tracked handlers.
+- Agent documentation index, full reference, and Markdown alternatives.
+
+### Changed
+
+- Nonblocking SQLite operations, isolated server/primitive identities, and catalog synchronization
+  that preserves history and includes unused registrations.
+- Rotating JSON Lines logs that omit exception messages; stricter analytics input validation.
+- Inbound SDK tracing disabled in the bundled server and examples; `disable_sdk_tracing()`
+  provides the same control for existing SDK v2 servers.
+
+### Migration
+
+- Back up databases before the automatic, one-way migration. Keep the server name stable;
+  restore the backup to downgrade.
+- The SDK extras require MCP SDK >=2.3,<3; SDK v1 integrations need handler updates.
+  The core remains SDK-independent.
+- Update log parsers for JSON Lines. Explicit query limits must be 1-1000; periods accept
+  only `all time`. Historical latency averages with unknown sample counts are `None`.
+
+See the [upgrade guide](docs/configuration.md#upgrading-from-02x) for compatibility details.
 
 ## [0.2.2] - 2026-02-16
 
@@ -64,7 +89,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub community files: CONTRIBUTING.md, SECURITY.md, issue/PR templates
 - Tags System documentation with filtering examples
 - Expanded API Reference with complete code examples
-- Test coverage improved
 
 ### Changed
 
@@ -99,9 +123,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - No required dependencies (pure Python stdlib)
 - Optional `mcp` extra for MCP SDK integration
 - Full type annotations with strict mypy compliance (`py.typed` marker included)
-- Comprehensive test suite
 
-[Unreleased]: https://github.com/tekkidev/mcpstat/compare/v0.2.2...HEAD
+[0.3.0]: https://github.com/tekkidev/mcpstat/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/tekkidev/mcpstat/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/tekkidev/mcpstat/compare/v0.1.2...v0.2.1
 [0.1.2]: https://github.com/tekkidev/mcpstat/compare/v0.1.1...v0.1.2

@@ -9,38 +9,68 @@
 [![Security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
 [![Codecov](https://codecov.io/gh/tekkidev/mcpstat/branch/main/graph/badge.svg)](https://codecov.io/gh/tekkidev/mcpstat)
 
-**Usage tracking and analytics for MCP servers.** Pure Python, zero required dependencies.
+**Python observability and usage analytics for MCP (Model Context Protocol) servers.**
 
-Track which tools get called, how often, and keep an audit trail - all in 3 lines of code.
+Track tool, prompt, and resource calls, successful and failed invocations, and execution
+latency in local SQLite storage. Add tracking to your existing Python MCP server and
+expose its statistics as MCP tools that an assistant can query. Optional file logging
+provides an audit trail.
 
 ## Installation
 
 ```bash
 pip install mcpstat
-```
-
-With MCP SDK:
-```bash
-pip install "mcpstat[mcp]"
+pip install "mcpstat[server]"  # Includes the SDK for the example below
 ```
 
 ## Quick Start
 
 ```python
-from mcp.server import Server
-from mcpstat import MCPStat
+from mcp.server import MCPServer
+from mcpstat import MCPStat, disable_sdk_tracing
 
-app = Server("my-server")
+app = MCPServer("my-server")
+disable_sdk_tracing(app)
 stat = MCPStat("my-server")
 
-@app.call_tool()
-@stat.track  # ← One decorator does everything!
-async def handle_tool(name: str, arguments: dict):
-    # Your logic here - latency tracked automatically
-    return await my_logic(arguments)
+
+@app.tool()
+@stat.track(name="echo")
+async def echo(message: str) -> str:
+    """Return a message, tracking usage and latency automatically."""
+    return message
+
+
+@app.tool()
+async def get_tool_usage_stats() -> dict:
+    """Return cumulative MCP usage statistics."""
+    return await stat.get_stats()
+
+
+if __name__ == "__main__":
+    try:
+        app.run()
+    finally:
+        stat.close()
 ```
 
-Then ask your AI assistant: *"Give me MCP usage stats"*
+Connect your assistant to this server, then ask: *"Give me MCP usage stats"*
+
+For a complete request-to-statistics example, follow the
+[weather server walkthrough](https://github.com/tekkidev/mcpstat/blob/main/docs/quickstart.md#verify-mcp-tool-usage-with-a-weather-server).
+It demonstrates successful calls, an intentional failure, unused tools, and statistics
+that persist after restarting the server.
+
+## Choose Your Integration
+
+| Use case | Installation | What it tracks |
+|----------|--------------|----------------|
+| Add tracking to an existing Python server | `pip install mcpstat` | The handlers you instrument with the SDK-independent library; keep your server's MCP SDK installed separately. |
+| Run the bundled documentation and demonstration server | `pip install "mcpstat[server]"` | Its own temperature conversion tools and other registered handlers. |
+
+The decorator records usage; register a statistics tool such as `get_tool_usage_stats`
+to query that data from Claude Code, VS Code, or another MCP client. The standalone
+server does not automatically observe other MCP servers.
 
 ## Features
 
@@ -50,7 +80,11 @@ Then ask your AI assistant: *"Give me MCP usage stats"*
 - **Token tracking** - Estimate or record actual token usage
 - **Latency tracking** - Measure execution duration, identify slow tools
 - **File logging** - Optional timestamped audit trail
-- **Async-first** - Thread-safe via `asyncio.Lock`
+- **Async-first** - Database operations run in worker threads with serialized transactions
+
+Install `mcpstat` for the SDK-independent tracking library. The `[server]` extra includes
+the SDK and the runnable `mcpstat` documentation and demonstration server. The standalone
+server tracks its own calls; integrate the library into each server you want to monitor.
 
 ## Documentation
 
@@ -61,6 +95,8 @@ Then ask your AI assistant: *"Give me MCP usage stats"*
 - [API Reference](https://github.com/tekkidev/mcpstat/blob/main/docs/api.md) - Complete method reference
 - [Token Tracking](https://github.com/tekkidev/mcpstat/blob/main/docs/token-tracking.md) - Cost analysis features
 - [Latency Tracking](https://github.com/tekkidev/mcpstat/blob/main/docs/latency-tracking.md) - Performance monitoring
+- [Agent Documentation Index](https://mcpstat.vadim.dev/llms.txt) - Links to plain Markdown guides and examples
+- [Full Agent Reference](https://mcpstat.vadim.dev/llms-full.txt) - Detailed integration and API summaries
 
 ## Examples
 
@@ -68,7 +104,7 @@ Then ask your AI assistant: *"Give me MCP usage stats"*
 # Clone and run example server
 git clone https://github.com/tekkidev/mcpstat.git
 cd mcpstat
-pip install -e ".[mcp]"
+pip install -e ".[dev]"
 python examples/example_server.py
 ```
 
@@ -86,6 +122,8 @@ pytest tests/
 ## License
 
 MIT - see [LICENSE](https://github.com/tekkidev/mcpstat/blob/main/LICENSE) for details.
+
+<!-- mcp-name: io.github.tekkidev/mcpstat -->
 
 ---
 
