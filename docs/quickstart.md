@@ -1,6 +1,6 @@
 # Quick Start
 
-Get mcpstat running in your MCP server in under five minutes.
+Add usage tracking to a Python MCP server and query its statistics.
 
 ---
 
@@ -111,6 +111,32 @@ unless `MCPSTAT_DB_PATH` overrides it. Compare deltas when a database already co
 usage. The example leaves its statistics tool untracked, so reading statistics does not
 increment that tool's count. Add `@stat.track(name="get_tool_usage_stats")` below
 `@app.tool()` to count queries too; a query's own completion appears in the next snapshot.
+
+### View statistics in VS Code
+
+[mcpstat for Visual Studio Code](https://github.com/tekkidev/mcpstat-vscode)
+displays calls, errors, latency and handler usage recorded by your server.
+
+1. Install the extension and start your instrumented MCP server in VS Code.
+2. Run **mcpstat: Connect MCP Server** from the Command Palette.
+3. Select that server's `get_tool_usage_stats` tool, including its VS Code prefix.
+
+Use **Refresh** for another observation. Editor connections start with manual
+refresh; **Start auto-refresh** explains how to pre-approve the statistics tool.
+VS Code versions or organization policies may still require confirmation.
+
+You can also connect directly to a Streamable HTTP endpoint or open the existing
+schema-4 SQLite database with **mcpstat: Connect Statistics Database**. SQLite
+access requires Python 3.10+ on the workspace host. Installing the extension does
+not add tracking to other servers. See the extension's
+[user guide](https://github.com/tekkidev/mcpstat-vscode#connect-your-mcp-server)
+for connection details and dashboard limits.
+
+If VS Code's Chat or MCP controls are hidden, open Settings and search
+`@id:chat.disableAIFeatures`. Uncheck **Chat: Disable AI Features** in the active
+profile or workspace, run **Developer: Reload Window**, then **MCP: List Servers**.
+An organization policy may control this setting. See the
+[VS Code AI settings reference](https://code.visualstudio.com/docs/agents/reference/ai-settings).
 
 ---
 

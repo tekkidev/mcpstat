@@ -19,6 +19,34 @@ from mcp_types import CallToolResult
 from mcpstat import MCPStat, MCPStatDatabase, MCPStatLogger
 
 
+@pytest.mark.parametrize("logging", [False, True])
+async def test_record_dispatches_only_enabled_file_logging(tmp_path, monkeypatch, logging):
+    """Disabled logs avoid a worker dispatch without losing persisted statistics."""
+    monkeypatch.setenv("MCPSTAT_LOG_ENABLED", str(logging).lower())
+    log_path = tmp_path / "usage.jsonl"
+    tracker = MCPStat("synthetic", db_path=str(tmp_path / "stats.sqlite"), log_path=str(log_path))
+    original = asyncio.to_thread
+    dispatched = []
+
+    async def observe(fn, *args, **kwargs):
+        dispatched.append(fn)
+        return await original(fn, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", observe)
+    try:
+        await tracker.record("synthetic_tool", error_msg="synthetic-private-value")
+        assert len(dispatched) == (2 if logging else 1)
+        row = (await tracker.get_stats())["stats"][0]
+        assert row["call_count"] == row["success_count"] == 1
+        assert log_path.exists() is logging
+        if logging:
+            line = json.loads(log_path.read_text())
+            assert line["name"] == "synthetic_tool"
+            assert "synthetic-private-value" not in log_path.read_text()
+    finally:
+        tracker.close()
+
+
 async def test_identity_and_history(tmp_path):
     path = str(tmp_path / "stats.sqlite")
     first, second = MCPStat("first", db_path=path), MCPStat("second", db_path=path)

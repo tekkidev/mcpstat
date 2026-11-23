@@ -191,14 +191,15 @@ class MCPStat:
             ```
         """
         # File logging (if enabled)
-        await asyncio.to_thread(
-            self._logger.log,
-            name,
-            primitive_type,
-            success=success,
-            error_msg=error_msg,
-            outcome=outcome,
-        )
+        if self._logger.enabled:
+            await asyncio.to_thread(
+                self._logger.log,
+                name,
+                primitive_type,
+                success=success,
+                error_msg=error_msg,
+                outcome=outcome,
+            )
 
         # SQLite tracking
         try:

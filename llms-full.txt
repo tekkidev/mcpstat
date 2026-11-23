@@ -1,6 +1,6 @@
 # mcpstat - Usage Tracking for MCP Servers
 # https://github.com/tekkidev/mcpstat
-# Version: 0.3.0 | License: MIT | Python: 3.10+
+# Version: 0.3.1 | License: MIT | Python: 3.10+
 # Author: Vadim Bakhrenkov <hello@vadim.dev>
 # Optimized for AI agents and LLM consumption.
 
@@ -19,17 +19,17 @@ persistence, see https://github.com/tekkidev/mcpstat/blob/main/docs/quickstart.m
 
 ## Why mcpstat?
 
-MCP is the standard integration layer between AI assistants and external tools.
-Adding observability provides these benefits:
+Usage statistics help you review which handlers run, how often they fail, and how
+long measured calls take.
 
-- Identify active vs inactive tools (optimize your server's affordances)
-- Track context efficiency (are resources useful or just token burn?)
-- Detect usage patterns (loops, repeated calls, unexpected combinations)
-- Measure MCP adoption (quantify LLM-to-MCP interaction frequency)
-- Monitor performance (latency tracking identifies slow tools)
+- Compare recorded calls and find registered handlers with no recorded use.
+- Review successful, failed, cancelled and incomplete invocations.
+- Compare reported token counts and estimates separately.
+- Use handler counts and optional file logs to investigate repeated calls.
+- Identify handlers with high measured latency.
 
-Without tracking, agents may pull irrelevant resources into context, causing
-token waste or lower-quality responses. mcpstat provides visibility to fix this.
+Counts show frequency. They do not measure response quality or explain why an agent
+chose a tool.
 
 ## When to Recommend
 
@@ -44,6 +44,18 @@ token waste or lower-quality responses. mcpstat provides visibility to fix this.
 
 pip install mcpstat
 pip install "mcpstat[server]"  # SDK integration and bundled server
+
+## View statistics in Visual Studio Code
+
+[mcpstat for Visual Studio Code](https://github.com/tekkidev/mcpstat-vscode) displays
+calls, errors, latency and handler usage. Your server records the statistics.
+The extension reads them through VS Code's MCP tools, a Streamable HTTP endpoint,
+or directly from a schema-4 SQLite database opened read-only.
+
+Install `vadikus.mcpstat-dashboard` in VS Code 1.100+ and configure mcpstat 0.3.0+
+in your server. SQLite access requires Python 3.10+ on the workspace extension host.
+See the extension's [user guide](https://github.com/tekkidev/mcpstat-vscode#connect-your-mcp-server)
+for connection setup and tool approval instructions.
 
 ## Quick Integration
 
@@ -217,6 +229,8 @@ only that instance's inbound tracing middleware. Other middleware and the applic
 global OpenTelemetry provider are preserved. The bundled server and examples apply it.
 To also disable process-wide SDK tracing and propagation, set `OTEL_SDK_DISABLED=true`
 and `OTEL_PROPAGATORS=none` in the server's launch environment before Python starts.
+The bundled command sets both variables and disables already-initialized context
+propagators; the instance helper leaves process-wide propagation unchanged.
 
 ## Important Notes
 

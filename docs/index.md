@@ -15,20 +15,27 @@ documentation and demonstration server tracks its own activity.
 Follow the [weather server walkthrough](quickstart.md#verify-mcp-tool-usage-with-a-weather-server)
 to send real MCP requests, inspect the resulting counters, and verify restart persistence.
 
+[mcpstat for Visual Studio Code](https://github.com/tekkidev/mcpstat-vscode) displays
+calls, errors, latency and handler usage. Your server records the statistics.
+The extension reads them through VS Code's MCP tools, an HTTP endpoint, or directly
+from a SQLite database.
+
 ---
 
 ## Why mcpstat?
 
-MCP is becoming the standard integration layer between AI assistants and external tools. Adding observability to this layer provides concrete benefits:
+Usage statistics help you review which handlers run, how often they fail, and how
+long measured calls take.
 
 | Benefit | Description |
 |---------|-------------|
-| **Identify active vs. inactive tools** | Understand which tools deliver value and which can be removed or improved. |
-| **Optimize context usage** | Track whether resources provide useful context or consume tokens without benefit. |
-| **Detect usage patterns** | Spot agent loops, repeated calls, or unexpected tool combinations. |
-| **Measure MCP adoption** | Quantify how often your LLM actually uses MCP integrations. |
+| **Identify active vs. inactive tools** | Compare recorded calls and find registered handlers with no recorded use. |
+| **Review token usage** | Compare reported token counts and estimates separately. |
+| **Investigate repeated calls** | Compare handler counts and use optional file logs to investigate individual calls. |
+| **Measure MCP usage** | Count invocations of the handlers you instrument across their clients. |
 
-Without tracking, agents may pull irrelevant resources into context - leading to token waste or lower-quality responses. mcpstat provides the visibility to identify and address these issues.
+Counts show frequency. They do not measure response quality or explain why an agent
+chose a tool.
 
 ---
 
@@ -70,7 +77,8 @@ async def echo(message: str) -> str:
     return message
 ```
 
-One decorator - `@stat.track` - and you get full tracking with automatic latency measurement.
+The decorator records each invocation and its duration. Register statistics tools
+to query the results.
 
 ---
 
@@ -108,7 +116,7 @@ points. The documentation website also links each page to its Markdown source.
 
     ---
 
-    Install mcpstat and add tracking to your first MCP server in minutes.
+    Install mcpstat and add tracking to a Python MCP server.
 
     [:octicons-arrow-right-24: Quick Start](quickstart.md)
 

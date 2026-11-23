@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "mcpstat"
-version = "0.3.0"
+version = "0.3.1"
 description = "Python MCP server observability: usage statistics, outcomes, latency, and optional file logging"
 authors = ["Vadim Bakhrenkov <hello@vadim.dev>"]
 license = "MIT"

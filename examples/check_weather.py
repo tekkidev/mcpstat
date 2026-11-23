@@ -38,6 +38,7 @@ async def verify() -> None:
                     "MCPSTAT_DB_PATH": str(Path(directory) / f"{mode}.sqlite"),
                     "MCPSTAT_LOG_ENABLED": "false",
                     "OTEL_SDK_DISABLED": "true",
+                    "OTEL_PROPAGATORS": "none",
                 },
             )
             async with Client(params, mode=mode) as client:

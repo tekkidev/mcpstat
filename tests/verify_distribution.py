@@ -13,13 +13,23 @@ from __future__ import annotations
 import asyncio
 import sys
 import tempfile
+from importlib.metadata import distribution
 from pathlib import Path
 
 from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 
+import mcpstat
+
 
 async def verify() -> None:
+    assert mcpstat.__version__ == distribution("mcpstat").version
+    assert Path(mcpstat.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()), (
+        "Run with an isolated wheel installation outside the source checkout"
+    )
+    installed_files = [str(path) for path in distribution("mcpstat").files or ()]
+    assert "ThirdPartyNotices.md" in installed_files, "Third-party notices are missing"
+    assert len(installed_files) == len(set(installed_files)), "Duplicate distribution paths"
     with tempfile.TemporaryDirectory() as directory:
         for mode in ("auto", "legacy"):
             params = StdioServerParameters(
@@ -29,6 +39,7 @@ async def verify() -> None:
                     "MCPSTAT_DB_PATH": str(Path(directory) / f"{mode}.sqlite"),
                     "MCPSTAT_LOG_ENABLED": "false",
                     "OTEL_SDK_DISABLED": "true",
+                    "OTEL_PROPAGATORS": "none",
                 },
             )
             async with Client(params, mode=mode) as client:

@@ -83,8 +83,9 @@ in its MCP launch configuration before Python starts:
 
 `OTEL_SDK_DISABLED` does not disable propagation by itself; `OTEL_PROPAGATORS=none`
 also disables the default trace-context and baggage propagators. The bundled command
-sets `OTEL_SDK_DISABLED=true` when it starts, and its registry launch configuration
-includes both variables. Configure the launch environment when an auto-instrumentation
+sets both variables and disables already-initialized context propagators when it
+starts. Its registry launch configuration also includes both variables. Configure
+the launch environment when an auto-instrumentation
 agent initializes before application code. The instance helper does not control
 outbound SDK client spans or instrumentation installed separately by the host.
 

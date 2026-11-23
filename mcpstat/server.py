@@ -22,7 +22,7 @@ Features:
 Run:
     python -m mcpstat.server
     # or via uvx (after PyPI install):
-    uvx mcpstat
+    uvx --from 'mcpstat[server]' mcpstat
 """
 
 from __future__ import annotations
@@ -448,7 +448,13 @@ async def run_server() -> None:
 
 def main() -> None:
     """Run the mcpstat command."""
+    from opentelemetry.propagate import set_global_textmap
+    from opentelemetry.propagators.composite import CompositePropagator
+
     os.environ["OTEL_SDK_DISABLED"] = "true"
+    os.environ["OTEL_PROPAGATORS"] = "none"
+    # The SDK may have initialized propagation before this entry point runs.
+    set_global_textmap(CompositePropagator([]))
     asyncio.run(run_server())
 
 

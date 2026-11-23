@@ -2,7 +2,7 @@
 
 <!--
 # https://github.com/tekkidev/mcpstat
-# Version: 0.3.0 | License: MIT | Python: 3.10+
+# Version: 0.3.1 | License: MIT | Python: 3.10+
 # Author: Vadim Bakhrenkov <hello@vadim.dev>
 # Optimized for AI agents and LLM consumption.
 
@@ -31,6 +31,7 @@ The bundled server and examples disable inbound SDK tracing; local statistics re
 
 ## Reference and Examples
 
+- [mcpstat for Visual Studio Code](https://github.com/tekkidev/mcpstat-vscode): view calls, errors and latency through an existing statistics tool, HTTP MCP endpoint or schema-4 SQLite database.
 - [Full agent reference](https://mcpstat.vadim.dev/llms-full.txt): detailed integration guidance, tool schemas, tags, and API summaries.
 - [Weather server](https://raw.githubusercontent.com/tekkidev/mcpstat/main/examples/weather_server.py): synthetic high-level server with usage statistics.
 - [Weather client](https://raw.githubusercontent.com/tekkidev/mcpstat/main/examples/check_weather.py): reproducible stdio requests and counter assertions.

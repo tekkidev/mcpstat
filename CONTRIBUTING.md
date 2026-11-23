@@ -122,7 +122,7 @@ ruff format .
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from mcp.types import Tool
+    from mcp_types import Tool
 ```
 
 ## Submitting Changes
@@ -195,6 +195,7 @@ Thank you for contributing to mcpstat! 🎉
 ## Package verification
 
 ```bash
+python -m pip install --upgrade pip
 python -m pip install -e '.[dev]' build twine bandit pip-audit
 python build_package.py
 python -m pytest
@@ -210,7 +211,6 @@ Verify a wheel in a clean environment outside the checkout with
 `tests/verify_distribution.py`. It launches a local stdio server using synthetic data
 and exercises tools, resources, prompts, and persistence.
 
-The publishing workflow defaults to a dry run. Publication requires a matching version
-tag in `tekkidev/mcpstat` and a PyPI Trusted Publisher configured for `pypi-publish.yaml` and
-the `pypi` environment. Source checks, distribution validation, and the installed-wheel
-exchange must pass before the publishing job receives OIDC permission.
+When updating dependencies, review upstream release notes and keep the declared
+Python range and optional extras compatible. Test a fresh installation to resolve
+the allowed versions, run the checks above and rebuild the distributions.

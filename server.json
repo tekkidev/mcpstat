@@ -7,12 +7,12 @@
     "url": "https://github.com/tekkidev/mcpstat",
     "source": "github"
   },
-  "version": "0.3.0",
+  "version": "0.3.1",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "mcpstat",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "registryBaseUrl": "https://pypi.org",
       "runtimeHint": "uvx",
       "transport": {
@@ -34,7 +34,7 @@
         {
           "type": "named",
           "name": "--with",
-          "value": "mcpstat[server]==0.3.0"
+          "value": "mcpstat[server]==0.3.1"
         }
       ]
     }

@@ -72,6 +72,11 @@ The decorator records usage; register a statistics tool such as `get_tool_usage_
 to query that data from Claude Code, VS Code, or another MCP client. The standalone
 server does not automatically observe other MCP servers.
 
+Use [mcpstat for Visual Studio Code](https://github.com/tekkidev/mcpstat-vscode) to view
+calls, errors, latency and handler usage. Your server records the statistics.
+The extension reads them through VS Code's MCP tools, an HTTP endpoint, or directly
+from a SQLite database.
+
 ## Features
 
 - **SQLite-backed** - Stats persist across restarts
@@ -90,7 +95,7 @@ server tracks its own calls; integrate the library into each server you want to 
 
 **[Full Documentation](https://github.com/tekkidev/mcpstat/tree/main/docs)** - Quick start, API reference, examples
 
-- [Quick Start](https://github.com/tekkidev/mcpstat/blob/main/docs/quickstart.md) - Get running in 5 minutes
+- [Quick Start](https://github.com/tekkidev/mcpstat/blob/main/docs/quickstart.md) - Measure MCP usage and view statistics
 - [Configuration](https://github.com/tekkidev/mcpstat/blob/main/docs/configuration.md) - Customize paths, logging, presets
 - [API Reference](https://github.com/tekkidev/mcpstat/blob/main/docs/api.md) - Complete method reference
 - [Token Tracking](https://github.com/tekkidev/mcpstat/blob/main/docs/token-tracking.md) - Cost analysis features
@@ -112,11 +117,12 @@ See [examples/](https://github.com/tekkidev/mcpstat/tree/main/examples/) for min
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/tekkidev/mcpstat/blob/main/CONTRIBUTING.md). Run tests with:
+See [CONTRIBUTING.md](https://github.com/tekkidev/mcpstat/blob/main/CONTRIBUTING.md).
+From a repository checkout, run tests with:
 
 ```bash
-pip install "mcpstat[dev]"
-pytest tests/
+python -m pip install -e ".[dev]"
+python -m pytest tests/
 ```
 
 ## License

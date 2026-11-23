@@ -49,6 +49,49 @@ def test_disable_tracing_preserves_other_middleware(factory, monkeypatch):
     assert os.environ["OTEL_SDK_DISABLED"] == "false"
 
 
+def test_command_disables_initialized_propagators(monkeypatch):
+    """The CLI drops incoming and outgoing context without replacing the provider."""
+    import os
+
+    from opentelemetry import baggage, propagate
+    from opentelemetry.baggage.propagation import W3CBaggagePropagator
+    from opentelemetry.propagators.composite import CompositePropagator
+    from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
+    from mcpstat import server
+
+    previous = propagate.get_global_textmap()
+    provider = trace.get_tracer_provider()
+    propagator = CompositePropagator([TraceContextTextMapPropagator(), W3CBaggagePropagator()])
+    context = trace.set_span_in_context(
+        trace.NonRecordingSpan(trace.SpanContext(trace_id=1, span_id=2, is_remote=False))
+    )
+    context = baggage.set_baggage("synthetic", "value", context=context)
+    carrier = {}
+    propagator.inject(carrier, context=context)
+    assert "traceparent" in carrier and "baggage" in carrier
+
+    async def verify():
+        outgoing = {}
+        propagate.inject(outgoing, context=context)
+        assert outgoing == {}
+        incoming = propagate.extract(carrier)
+        assert not trace.get_current_span(incoming).get_span_context().is_valid
+        assert baggage.get_all(incoming) == {}
+        assert trace.get_tracer_provider() is provider
+        assert os.environ["OTEL_SDK_DISABLED"] == "true"
+        assert os.environ["OTEL_PROPAGATORS"] == "none"
+
+    monkeypatch.setenv("OTEL_SDK_DISABLED", "false")
+    monkeypatch.setenv("OTEL_PROPAGATORS", "tracecontext,baggage")
+    monkeypatch.setattr(server, "run_server", verify)
+    try:
+        propagate.set_global_textmap(propagator)
+        server.main()
+    finally:
+        propagate.set_global_textmap(previous)
+
+
 _TRACED_SERVER = """
 import json
 import os
