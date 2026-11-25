@@ -26,6 +26,7 @@ from mcpstat import (
     generate_stats_prompt,
     normalize_tags,
 )
+from mcpstat.utils import parse_tags_string, tags_to_string
 
 # ============================================================================
 # Utils Tests
@@ -95,6 +96,15 @@ class TestDeriveShortDescription:
         """Test with empty fallback name."""
         result = derive_short_description(None, "")
         assert result == "No description available."
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(None, []), ("", []), (" , ", []), ("alpha, beta,, gamma ", ["alpha", "beta", "gamma"])],
+)
+def test_legacy_tag_string_parsing(value, expected):
+    assert parse_tags_string(value) == expected
+    assert parse_tags_string(tags_to_string(expected)) == expected
 
 
 # ============================================================================
@@ -1032,6 +1042,11 @@ class TestMCPStat:
 
 class TestPrompts:
     """Tests for prompt functions."""
+
+    @pytest.mark.asyncio
+    async def test_invalid_type_filter_is_rejected(self, stat_fixture):
+        with pytest.raises(ValueError, match="Invalid type filter"):
+            await generate_stats_prompt(stat_fixture, type_filter="unknown")
 
     def test_build_prompt_definition(self):
         defn = build_prompt_definition("test_stats", "Test Server")

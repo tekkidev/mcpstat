@@ -10,8 +10,11 @@ Tests for mcpstat.server - Documentation & Demo MCP server.
 
 from __future__ import annotations
 
+import asyncio
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -455,6 +458,40 @@ class TestEntryPoint:
         assert asyncio.iscoroutinefunction(run_server)
 
 
+@pytest.mark.parametrize("failure", [None, RuntimeError, asyncio.CancelledError])
+async def test_run_server_closes_transport_and_tracker(monkeypatch, failure):
+    """Release owned resources after normal exit, protocol failure or cancellation."""
+    events = []
+    read, write, options = object(), object(), object()
+
+    @asynccontextmanager
+    async def transport():
+        try:
+            yield read, write
+        finally:
+            events.append("transport closed")
+
+    async def run(actual_read, actual_write, actual_options):
+        assert (actual_read, actual_write, actual_options) == (read, write, options)
+        events.append("run")
+        if failure is not None:
+            raise failure()
+
+    monkeypatch.setattr(server, "stdio_server", transport)
+    monkeypatch.setattr(
+        server, "app", SimpleNamespace(run=run, create_initialization_options=lambda: options)
+    )
+    monkeypatch.setattr(
+        server, "stat", SimpleNamespace(close=lambda: events.append("tracker closed"))
+    )
+    if failure is None:
+        await server.run_server()
+    else:
+        with pytest.raises(failure):
+            await server.run_server()
+    assert events == ["run", "transport closed", "tracker closed"]
+
+
 # ============================================================================
 # server.json validation
 # ============================================================================
@@ -482,7 +519,9 @@ class TestServerJson:
         """Test that server.json references the correct schema."""
         data = json.loads(server_json_path.read_text())
         assert "$schema" in data
-        assert "modelcontextprotocol.io" in data["$schema"]
+        assert data["$schema"] == (
+            "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
+        )
 
     def test_server_json_name_format(self, server_json_path: Path):
         """Test that server name follows io.github.* convention."""
