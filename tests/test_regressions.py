@@ -79,7 +79,12 @@ async def test_outcomes(tmp_path):
     async def cancel():
         raise asyncio.CancelledError
 
+    @tracker.track(name="input_required")
+    async def request_input():
+        return SimpleNamespace(result_type="input_required")
+
     await error()
+    await request_input()
     with pytest.raises(asyncio.CancelledError):
         await cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -89,6 +94,9 @@ async def test_outcomes(tmp_path):
     assert rows["returned_error"]["error_count"] == 1
     assert rows["cancelled"]["cancelled_count"] == 1
     assert rows["context_cancel"]["cancelled_count"] == 1
+    assert rows["input_required"]["incomplete_count"] == 1
+    assert rows["input_required"]["success_count"] == 0
+    assert rows["input_required"]["error_count"] == 0
 
 
 async def test_concurrent_instances(tmp_path):
@@ -176,3 +184,29 @@ async def test_query_boolean_flags_are_strict(tmp_path, invalid):
         await db.get_stats(include_zero=invalid)
     with pytest.raises(ValueError, match="include_usage must be a boolean"):
         await db.get_catalog(include_usage=invalid)
+
+
+@pytest.mark.parametrize("environment", [None, "unrecognized"])
+@pytest.mark.parametrize("enabled", [None, False, True])
+async def test_logging_defaults_follow_explicit_configuration(
+    tmp_path, monkeypatch, environment, enabled
+):
+    """Without a recognized environment override, the explicit option controls I/O."""
+    if environment is None:
+        monkeypatch.delenv("MCPSTAT_LOG_ENABLED", raising=False)
+    else:
+        monkeypatch.setenv("MCPSTAT_LOG_ENABLED", environment)
+    path = tmp_path / "usage.jsonl"
+    tracker = MCPStat(
+        "synthetic",
+        db_path=str(tmp_path / "stats.sqlite"),
+        log_path=str(path),
+        log_enabled=enabled,
+    )
+    try:
+        await tracker.record("tool")
+        assert tracker.log_enabled is bool(enabled)
+        assert path.exists() is bool(enabled)
+        assert (await tracker.get_stats())["total_calls"] == 1
+    finally:
+        tracker.close()
