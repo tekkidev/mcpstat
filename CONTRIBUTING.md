@@ -35,6 +35,8 @@ Please read and follow our [Code of Conduct](https://github.com/tekkidev/mcpstat
 
 ### Running the Tests
 
+Add automated tests for new functionality and regression tests for bug fixes.
+
 ```bash
 # Run all tests with coverage (configured in pyproject.toml)
 python build_package.py

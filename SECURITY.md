@@ -10,14 +10,11 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in mcpstat, please report it responsibly:
-
-1. **Do not** open a public GitHub issue
-2. Email the maintainer at hello@vadim.dev with:
-   - Description of the vulnerability
-   - Steps to reproduce
-   - Potential impact
-   - Any suggested fixes (optional)
+Report suspected vulnerabilities privately using
+[GitHub's reporting form](https://github.com/tekkidev/mcpstat/security/advisories/new).
+Include the mcpstat and Python versions, affected integration, reproduction steps
+and potential impact. Suggested fixes are welcome. Do not include credentials or
+production usage databases. Please do not report vulnerabilities through public issues.
 
 You can expect:
 
