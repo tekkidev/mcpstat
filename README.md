@@ -8,6 +8,7 @@
 [![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue)](http://mypy-lang.org/)
 [![Security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
 [![Codecov](https://codecov.io/gh/tekkidev/mcpstat/branch/main/graph/badge.svg)](https://codecov.io/gh/tekkidev/mcpstat)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/17102/badge)](https://www.bestpractices.dev/en/projects/17102/passing)
 
 **Python observability and usage analytics for MCP (Model Context Protocol) servers.**
 
